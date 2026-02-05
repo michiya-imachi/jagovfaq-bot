@@ -1,0 +1,17 @@
+[project]
+name = "jagovfaq-bot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "faiss-cpu>=1.13.2",
+    "langchain>=1.2.8",
+    "langchain-openai>=1.1.7",
+    "langgraph>=1.0.7",
+    "numpy>=2.4.2",
+    "openai>=2.16.0",
+    "python-dotenv>=1.2.1",
+    "rank-bm25>=0.2.2",
+    "tqdm>=4.67.3",
+]
