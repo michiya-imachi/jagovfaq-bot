@@ -1,11 +1,23 @@
+import logging
 import os
 from typing import Any, Dict, List, Tuple
 
-import numpy as np
-
 from app.core.config import get_env_float, get_env_int
 from app.core.store import IndexedStore
-from app.core.types import GraphState, MetaItem
+from app.core.types import GraphState
+
+
+logger = logging.getLogger(__name__)
+
+
+def shorten_text(text: Any, max_len: int) -> str:
+    # Truncate for log readability.
+    if text is None:
+        return ""
+    s = str(text).replace("\n", " ").strip()
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1] + "…"
 
 
 def sorted_items_desc(m: Dict[int, float]) -> List[Tuple[int, float]]:
@@ -14,9 +26,7 @@ def sorted_items_desc(m: Dict[int, float]) -> List[Tuple[int, float]]:
 
 def node_retrieval_router():
     def _run(state: GraphState) -> GraphState:
-        # This node decides which retrievers to run.
-        # Default: run both. You can override via env var RETRIEVAL_MODE.
-        # Supported values: "both", "bm25", "vec"
+        # Decide which retrievers to run based on env var RETRIEVAL_MODE.
         mode = str(os.getenv("RETRIEVAL_MODE", "")).strip().lower()
 
         if mode in {"bm25", "keyword"}:
@@ -30,6 +40,24 @@ def node_retrieval_router():
                 ("env:both" if mode in {"both", "hybrid"} else "default_both"),
             )
 
+        if run_bm25 and run_vec:
+            plan = "bm25+vec"
+        elif run_bm25:
+            plan = "bm25_only"
+        elif run_vec:
+            plan = "vec_only"
+        else:
+            plan = "none"
+
+        user_query = shorten_text(state.get("user_query", ""), 120)
+        logger.info(
+            '[retrieval-router] mode="%s" plan=%s reason=%s user_query="%s"',
+            mode,
+            plan,
+            reason,
+            user_query,
+        )
+
         # Return only updated keys to avoid conflicts.
         return {
             "run_bm25": bool(run_bm25),
@@ -40,88 +68,6 @@ def node_retrieval_router():
     return _run
 
 
-# --- Legacy fusion retriever (kept for reference) --------------------------------
-def rank_candidates_fusion(
-    bm25_scores: Dict[int, float],
-    vec_scores: Dict[int, float],
-    alpha: float = 1.0,
-    beta: float = 1.0,
-) -> List[Dict[str, Any]]:
-    # Fusion strategy (replaceable later with other rerankers).
-    all_ids = set(bm25_scores.keys()) | set(vec_scores.keys())
-
-    def norm_map(m: Dict[int, float]) -> Dict[int, float]:
-        if not m:
-            return {}
-        vals = np.array(list(m.values()), dtype=np.float32)
-        vmin = float(vals.min())
-        vmax = float(vals.max())
-        if vmax - vmin < 1e-8:
-            return {k: 0.0 for k in m.keys()}
-        return {k: (v - vmin) / (vmax - vmin) for k, v in m.items()}
-
-    bm25_n = norm_map(bm25_scores)
-    vec_n = norm_map(vec_scores)
-
-    candidates: List[Dict[str, Any]] = []
-    for rid in all_ids:
-        b = float(bm25_n.get(rid, 0.0))
-        v = float(vec_n.get(rid, 0.0))
-        fused = alpha * b + beta * v
-        candidates.append(
-            {
-                "id": int(rid),
-                "fused_score": float(fused),
-                "bm25_raw": float(bm25_scores.get(rid, 0.0)),
-                "vec_raw": float(vec_scores.get(rid, 0.0)),
-            }
-        )
-
-    candidates.sort(key=lambda x: x["fused_score"], reverse=True)
-    return candidates
-
-
-def retrieve_hybrid(
-    store: IndexedStore,
-    query: str,
-    bm25_top_n: int = 50,
-    vec_top_n: int = 50,
-    final_top_k: int = 8,
-) -> List[Dict[str, Any]]:
-    bm25_scores = store.bm25_search(query, top_n=bm25_top_n)
-    vec_scores = store.vec_search(query, top_n=vec_top_n)
-
-    ranked = rank_candidates_fusion(bm25_scores, vec_scores, alpha=1.0, beta=1.0)[
-        :final_top_k
-    ]
-
-    results: List[Dict[str, Any]] = []
-    for c in ranked:
-        it = store.meta_by_id.get(c["id"])
-        if not it:
-            continue
-        results.append(
-            {
-                "item": it,
-                "score": c["fused_score"],
-                "bm25_raw": c["bm25_raw"],
-                "vec_raw": c["vec_raw"],
-            }
-        )
-    return results
-
-
-def node_retrieve(store: IndexedStore):
-    # Legacy single-node hybrid retriever (unused in the new graph).
-    def _run(state: GraphState) -> GraphState:
-        query = state["user_query"].strip()
-        retrieved = retrieve_hybrid(store, query)
-        return {**state, "retrieved": retrieved}
-
-    return _run
-
-
-# --- New retrieval pipeline (BM25 node + Vector node + Organizer node) -----------
 def node_retrieve_bm25(store: IndexedStore):
     def _run(state: GraphState) -> GraphState:
         if not bool(state.get("run_bm25", True)):
@@ -221,87 +167,6 @@ def node_retrieve_vec_threshold(store: IndexedStore):
             "vec_retrieved": out,
             "vec_count": len(out),
             "vec_pass_count": int(pass_count),
-        }
-
-    return _run
-
-
-def node_organize_candidates():
-    def _run(state: GraphState) -> GraphState:
-        bm25 = state.get("bm25_retrieved", []) or []
-        vec = state.get("vec_retrieved", []) or []
-
-        rrf_k = max(1, get_env_int("RRF_K", 60))
-        final_topk = max(1, get_env_int("FINAL_TOPK", 20))
-
-        by_id: Dict[int, Dict[str, Any]] = {}
-
-        for r in bm25:
-            rid = int(r["id"])
-            it: MetaItem = r["item"]
-            by_id[rid] = {
-                "id": rid,
-                "item": it,
-                "bm25_raw": r.get("bm25_raw"),
-                "bm25_rank": r.get("bm25_rank"),
-                "vec_raw": None,
-                "vec_rank": None,
-                "vec_pass_threshold": False,
-                "sources": ["bm25"],
-            }
-
-        for r in vec:
-            rid = int(r["id"])
-            it: MetaItem = r["item"]
-            if rid not in by_id:
-                by_id[rid] = {
-                    "id": rid,
-                    "item": it,
-                    "bm25_raw": None,
-                    "bm25_rank": None,
-                    "vec_raw": r.get("vec_raw"),
-                    "vec_rank": r.get("vec_rank"),
-                    "vec_pass_threshold": bool(r.get("vec_pass_threshold", False)),
-                    "sources": ["vec"],
-                }
-            else:
-                by_id[rid]["vec_raw"] = r.get("vec_raw")
-                by_id[rid]["vec_rank"] = r.get("vec_rank")
-                by_id[rid]["vec_pass_threshold"] = bool(
-                    r.get("vec_pass_threshold", False)
-                )
-                if "vec" not in by_id[rid]["sources"]:
-                    by_id[rid]["sources"].append("vec")
-
-        organized: List[Dict[str, Any]] = []
-        for _, r in by_id.items():
-            bm25_rank = r.get("bm25_rank")
-            vec_rank = r.get("vec_rank")
-
-            score = 0.0
-            if isinstance(bm25_rank, int) and bm25_rank > 0:
-                score += 1.0 / float(rrf_k + bm25_rank)
-            if isinstance(vec_rank, int) and vec_rank > 0:
-                score += 1.0 / float(rrf_k + vec_rank)
-
-            has_both = ("bm25" in r.get("sources", [])) and (
-                "vec" in r.get("sources", [])
-            )
-
-            organized.append(
-                {
-                    **r,
-                    "has_both": bool(has_both),
-                    "score": float(score),
-                }
-            )
-
-        organized.sort(key=lambda x: x["score"], reverse=True)
-        organized = organized[:final_topk]
-
-        return {
-            **state,
-            "retrieved": organized,
         }
 
     return _run

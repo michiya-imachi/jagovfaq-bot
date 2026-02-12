@@ -11,12 +11,13 @@ from app.nodes.qa import (
     node_generate_answer_stream,
 )
 from app.nodes.retrieval import (
-    node_organize_candidates,
     node_retrieval_router,
     node_retrieve_bm25,
     node_retrieve_vec_threshold,
 )
+from app.nodes.rrf import node_rrf_rank
 from app.nodes.routing import node_retrieve_route
+from app.nodes.topk_filter import node_topk_filter
 from app.prompts.loader import PromptLoader
 
 
@@ -44,7 +45,15 @@ def build_graph(store: IndexedStore, llm: Any, prompts: PromptLoader):
     graph.add_node(
         "retrieve_vec", wrap_node("retrieve_vec", node_retrieve_vec_threshold(store))
     )
-    graph.add_node("organize", wrap_node("organize", node_organize_candidates()))
+
+    graph.add_node("rrf_rank", wrap_node("rrf_rank", node_rrf_rank()))
+    graph.add_node(
+        "topk_filter",
+        wrap_node(
+            "topk_filter",
+            node_topk_filter(input_key="rrf_ranked_all", output_key="retrieved"),
+        ),
+    )
 
     graph.add_node("retrieve_route", wrap_node("retrieve_route", node_retrieve_route))
     graph.add_node("ask", wrap_node("ask", node_ask_clarification(llm, prompts)))
@@ -53,12 +62,13 @@ def build_graph(store: IndexedStore, llm: Any, prompts: PromptLoader):
     )
     graph.add_node("fallback", wrap_node("fallback", node_fallback))
 
-    # Entry -> router -> parallel retrievals -> join -> organizer -> retrieve_route.
+    # Entry -> router -> parallel retrievals -> join -> rrf_rank -> topk_filter -> retrieve_route.
     graph.set_entry_point("retrieval_router")
     graph.add_edge("retrieval_router", "retrieve_bm25")
     graph.add_edge("retrieval_router", "retrieve_vec")
-    graph.add_edge(["retrieve_bm25", "retrieve_vec"], "organize")
-    graph.add_edge("organize", "retrieve_route")
+    graph.add_edge(["retrieve_bm25", "retrieve_vec"], "rrf_rank")
+    graph.add_edge("rrf_rank", "topk_filter")
+    graph.add_edge("topk_filter", "retrieve_route")
 
     def _router(state: GraphState) -> str:
         retrieved = state.get("retrieved", [])

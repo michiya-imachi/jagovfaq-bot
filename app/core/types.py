@@ -20,7 +20,10 @@ class GraphState(TypedDict, total=False):
     bm25_retrieved: List[Dict[str, Any]]
     vec_retrieved: List[Dict[str, Any]]
 
-    # Final organized candidates (used downstream by ask/answer)
+    # All ranked candidates after RRF (pre TopK)
+    rrf_ranked_all: List[Dict[str, Any]]
+
+    # Final candidates after TopK filter (used downstream by ask/answer)
     retrieved: List[Dict[str, Any]]
 
     answer: str
