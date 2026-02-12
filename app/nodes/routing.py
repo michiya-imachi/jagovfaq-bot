@@ -1,9 +1,12 @@
+import logging
 import os
-import sys
 from typing import Any, Dict, List
 
 from app.core.config import get_env_float
 from app.core.types import GraphState
+
+
+logger = logging.getLogger(__name__)
 
 
 def shorten_text(text: str, max_len: int) -> str:
@@ -23,8 +26,7 @@ def log_retrieve_route_debug(
     turn_count: int,
     max_turns: int,
 ) -> None:
-    # Debug log for routing and retrieved references. Print to stderr to avoid
-    # mixing with streamed stdout output in the answer node.
+    # Debug log for routing and retrieved references.
     try:
         topk = int(os.getenv("ROUTE_LOG_TOPK", "5"))
     except Exception:
@@ -50,14 +52,12 @@ def log_retrieve_route_debug(
     plan = f"bm25={bool(state.get('run_bm25', True))} vec={bool(state.get('run_vec', True))}"
     plan_reason = shorten_text(state.get("retrieval_plan_reason", ""), 40)
 
-    print(
+    logger.debug(
         f"[retrieve-route-debug] turn={turn_count}/{max_turns} "
         f"need_clarification={need_clarification} "
         f"plan={plan} plan_reason={plan_reason} "
         f"candidates={cand_count} top_score={top_score_str} top_sources={top_sources} top_vec_raw={top_vec_str} "
-        f'user_query="{user_query}"',
-        file=sys.stderr,
-        flush=True,
+        f'user_query="{user_query}"'
     )
 
     for i, r in enumerate(retrieved[:topk], start=1):
@@ -79,11 +79,9 @@ def log_retrieve_route_debug(
             f"{float(vec_raw):.3f}" if isinstance(vec_raw, (int, float)) else "-"
         )
 
-        print(
+        logger.debug(
             f"[retrieve-route-debug] #{i} id={rid} score={score_str} sources={sources} bm25_rank={bm25_rank_str} vec_rank={vec_rank_str} vec_raw={vec_raw_str} "
-            f'Q="{q}" url="{url}"',
-            file=sys.stderr,
-            flush=True,
+            f'Q="{q}" url="{url}"'
         )
 
 

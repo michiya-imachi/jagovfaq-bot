@@ -1,6 +1,9 @@
-import sys
+import logging
 from pathlib import Path
 from typing import Any, Optional, Tuple
+
+
+logger = logging.getLogger(__name__)
 
 
 def export_graph_artifacts(app: Any, out_dir: Path) -> Tuple[Path, Optional[Path]]:
@@ -28,10 +31,6 @@ def export_graph_artifacts(app: Any, out_dir: Path) -> Tuple[Path, Optional[Path
             png_path.write_bytes(bytes(png_bytes))
     except Exception as e:
         png_ok = False
-        print(
-            f"WARNING: graph PNG export failed: {type(e).__name__}: {e}",
-            file=sys.stderr,
-            flush=True,
-        )
+        logger.warning("graph PNG export failed: %s: %s", type(e).__name__, e)
 
     return mmd_path, (png_path if png_ok else None)

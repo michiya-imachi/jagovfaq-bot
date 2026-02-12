@@ -1,11 +1,13 @@
+import argparse
 import json
+import logging
 import os
 import pickle
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import faiss
 import numpy as np
@@ -14,7 +16,12 @@ from openai import OpenAI
 from rank_bm25 import BM25Okapi
 from tqdm import tqdm
 
+from app.core.logging import setup_logging
 from app.core.text_utils import simple_tokenize
+
+
+LOG_LEVEL_CHOICES = ["debug", "info", "warning", "error", "critical"]
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -178,11 +185,24 @@ def write_manifest(out_path: Path, meta: Dict[str, Any]) -> None:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
 
-def main() -> None:
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Build JaGov FAQ search index")
+    parser.add_argument(
+        "--log-level",
+        default="info",
+        choices=LOG_LEVEL_CHOICES,
+        help="Logging level for debug/error logs (default: info).",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[List[str]] = None) -> None:
+    args = parse_args(argv)
+    setup_logging(args.log_level)
     load_dotenv()
 
     if not os.getenv("OPENAI_API_KEY"):
-        print("ERROR: OPENAI_API_KEY is not set. Put it in .env.", file=sys.stderr)
+        logger.error("OPENAI_API_KEY is not set. Put it in .env.")
         sys.exit(1)
 
     embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")

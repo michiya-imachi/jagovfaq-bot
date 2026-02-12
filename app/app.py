@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
@@ -6,6 +7,7 @@ from typing import List, Optional
 
 from app.core.config import load_env_files, resolve_index_dir
 from app.core.llm import make_embeddings, make_llm
+from app.core.logging import setup_logging
 from app.core.store import IndexedStore
 from app.core.types import GraphState
 from app.graph.builder import build_graph, build_graph_for_export
@@ -13,9 +15,19 @@ from app.graph.export import export_graph_artifacts
 from app.prompts.loader import PromptLoader
 
 
+LOG_LEVEL_CHOICES = ["debug", "info", "warning", "error", "critical"]
+logger = logging.getLogger(__name__)
+
+
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="JaGov FAQ Bot - Indexed (BM25+FAISS) + Streaming Answer"
+    )
+    parser.add_argument(
+        "--log-level",
+        default="info",
+        choices=LOG_LEVEL_CHOICES,
+        help="Logging level for debug/error logs (default: info).",
     )
     parser.add_argument(
         "--export-graph",
@@ -32,6 +44,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    setup_logging(args.log_level)
     load_env_files()
 
     if args.export_graph:
@@ -50,15 +63,14 @@ def main() -> None:
         return
 
     if not os.getenv("OPENAI_API_KEY"):
-        print("ERROR: OPENAI_API_KEY is not set. Put it in .env.", file=sys.stderr)
+        logger.error("OPENAI_API_KEY is not set. Put it in .env.")
         sys.exit(1)
 
     index_dir = resolve_index_dir()
     if not index_dir.exists():
-        print(f"ERROR: index dir not found: {index_dir}", file=sys.stderr)
-        print(
-            "If you haven't built the index here, run: uv run python -m app.indexer.indexer",
-            file=sys.stderr,
+        logger.error("index dir not found: %s", index_dir)
+        logger.error(
+            "If you haven't built the index here, run: uv run python -m app.indexer.indexer"
         )
         sys.exit(1)
 

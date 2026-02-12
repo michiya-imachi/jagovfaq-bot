@@ -1,4 +1,4 @@
-import sys
+import logging
 from typing import Any
 
 from langgraph.graph import END, StateGraph
@@ -20,10 +20,13 @@ from app.nodes.routing import node_retrieve_route
 from app.prompts.loader import PromptLoader
 
 
+logger = logging.getLogger(__name__)
+
+
 def wrap_node(name: str, fn):
-    # Log node execution to stderr to avoid mixing with streamed stdout output.
+    # Keep debug logs off by default and enable them when --log-level debug is used.
     def _wrapped(state: GraphState) -> GraphState:
-        print(f"[node] {name}", file=sys.stderr, flush=True)
+        logger.debug("[node] %s", name)
         return fn(state)
 
     return _wrapped
@@ -70,7 +73,7 @@ def build_graph(store: IndexedStore, llm: Any, prompts: PromptLoader):
         else:
             nxt = "answer"
 
-        print(f"[router] retrieve_route -> {nxt}", file=sys.stderr, flush=True)
+        logger.debug("[router] retrieve_route -> %s", nxt)
         return nxt
 
     graph.add_conditional_edges(
