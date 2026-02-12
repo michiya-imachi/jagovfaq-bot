@@ -7,14 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+import faiss
 import numpy as np
 from dotenv import load_dotenv
-from rank_bm25 import BM25Okapi
-import faiss
 from openai import OpenAI
+from rank_bm25 import BM25Okapi
 from tqdm import tqdm
 
-from text_utils import simple_tokenize
+from app.core.text_utils import simple_tokenize
 
 
 @dataclass
@@ -108,7 +108,7 @@ def embed_documents_with_tqdm(
             i1 = min(total, i0 + batch_size)
             chunk = texts[i0:i1]
 
-            # Show which batch we're on
+            # Show which batch we're on.
             elapsed = time.perf_counter() - start
             pbar.set_postfix_str(f"batch {b+1}/{total_batches} elapsed {elapsed:.0f}s")
 
@@ -126,7 +126,7 @@ def embed_documents_with_tqdm(
                     break
                 except Exception as e:
                     last_err = e
-                    # Print retry info without breaking the progress bar
+                    # Print retry info without breaking the progress bar.
                     tqdm.write(
                         f"[Embedding] retry {attempt+1}/{max_retries} failed: {type(e).__name__}: {e}"
                     )
@@ -193,7 +193,7 @@ def main() -> None:
     out_dir = Path("data/index")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Tunables
+    # Tunables.
     batch_size = int(os.getenv("EMBED_BATCH_SIZE", "64"))
     timeout_s = float(os.getenv("EMBED_TIMEOUT_S", "60"))
     max_retries = int(os.getenv("EMBED_MAX_RETRIES", "3"))

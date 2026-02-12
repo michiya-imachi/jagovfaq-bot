@@ -4,6 +4,8 @@ from pathlib import Path
 from string import Template
 from typing import Dict
 
+from app.core.config import resolve_repo_root
+
 
 @dataclass(frozen=True)
 class PromptTemplate:
@@ -19,7 +21,7 @@ class PromptLoader:
 
     @staticmethod
     def _resolve_prompt_dir() -> Path:
-        # Prefer explicit path via env var
+        # Prefer explicit path via env var.
         env_dir = os.getenv("PROMPT_DIR")
         if env_dir:
             p = Path(env_dir)
@@ -27,15 +29,18 @@ class PromptLoader:
                 return p
             raise FileNotFoundError(f"PROMPT_DIR not found or not a directory: {p}")
 
-        # Search upward from this file to find repo-root prompts/
-        start = Path(__file__).resolve().parent
-        for d in [start, *start.parents]:
-            candidate = d / "prompts"
+        repo_root = resolve_repo_root()
+        candidates = [
+            repo_root / "app" / "prompts" / "templates",
+            repo_root / "prompts",  # Legacy fallback
+        ]
+        for candidate in candidates:
             if candidate.exists() and candidate.is_dir():
                 return candidate
 
         raise FileNotFoundError(
-            "prompts/ directory not found. Create prompts/ at repo root or set PROMPT_DIR."
+            "Prompt templates directory not found. "
+            "Create app/prompts/templates or set PROMPT_DIR."
         )
 
     @classmethod
@@ -70,3 +75,4 @@ class PromptLoader:
     def available(self) -> Dict[str, str]:
         # Return prompt name -> filename for debugging/logging.
         return {k: v.path.name for k, v in self._templates.items()}
+

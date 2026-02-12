@@ -9,3 +9,4 @@ ${user_query}
 ${context}
 
 出力は確認質問1つだけ。
+

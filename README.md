@@ -3,11 +3,17 @@
 実行
 
 ```shell
-uv run python app.py
+uv run python -m app.app
 ```
 
 グラフ作成
 
 ```shell
-uv run python app.py --export-graph
+uv run python -m app.app --export-graph
+```
+
+インデックス作成
+
+```shell
+uv run python -m app.indexer.indexer
 ```

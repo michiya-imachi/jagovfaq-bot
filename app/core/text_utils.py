@@ -40,3 +40,4 @@ def simple_tokenize(text: str) -> List[str]:
         text = text.replace(ch, " ")
     tokens = [t for t in text.split(" ") if t]
     return tokens
+
