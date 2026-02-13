@@ -18,7 +18,7 @@ from app.nodes.retrieval import (
     node_retrieve_vec_threshold,
 )
 from app.nodes.rrf import node_rrf_rank
-from app.nodes.routing import node_decide_next_action
+from app.nodes.routing import make_decide_next_action
 from app.nodes.standalone_question import node_standalone_question
 from app.nodes.topk_filter import node_topk_filter
 from app.prompts.loader import PromptLoader
@@ -70,7 +70,10 @@ def build_graph(
 
     graph.add_node(
         "decide_next_action",
-        wrap_node("decide_next_action", node_decide_next_action),
+        wrap_node(
+            "decide_next_action",
+            make_decide_next_action(top_n=10, candidate_source="rrf_ranked_all"),
+        ),
     )
 
     graph.add_node(
