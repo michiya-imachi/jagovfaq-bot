@@ -1,13 +1,15 @@
 import logging
-from typing import Any
+from typing import Any, Optional
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 from app.core.store import IndexedStore
 from app.core.types import GraphState
+from app.nodes.hitl import node_apply_followup, node_hitl_wait_user_input
 from app.nodes.qa import (
-    node_ask_clarification,
     node_fallback,
+    node_followup_question,
     node_generate_answer_stream,
 )
 from app.nodes.retrieval import (
@@ -16,7 +18,7 @@ from app.nodes.retrieval import (
     node_retrieve_vec_threshold,
 )
 from app.nodes.rrf import node_rrf_rank
-from app.nodes.routing import node_retrieve_route
+from app.nodes.routing import node_decide_next_action
 from app.nodes.topk_filter import node_topk_filter
 from app.prompts.loader import PromptLoader
 
@@ -33,7 +35,12 @@ def wrap_node(name: str, fn):
     return _wrapped
 
 
-def build_graph(store: IndexedStore, llm: Any, prompts: PromptLoader):
+def build_graph(
+    store: IndexedStore,
+    llm: Any,
+    prompts: PromptLoader,
+    checkpointer: Optional[Any] = None,
+):
     graph = StateGraph(GraphState)
 
     graph.add_node(
@@ -55,47 +62,75 @@ def build_graph(store: IndexedStore, llm: Any, prompts: PromptLoader):
         ),
     )
 
-    graph.add_node("retrieve_route", wrap_node("retrieve_route", node_retrieve_route))
-    graph.add_node("ask", wrap_node("ask", node_ask_clarification(llm, prompts)))
+    graph.add_node(
+        "decide_next_action",
+        wrap_node("decide_next_action", node_decide_next_action),
+    )
+
+    # Follow-up question generation (LLM) - not HITL
+    graph.add_node(
+        "followup_question",
+        wrap_node("followup_question", node_followup_question(llm, prompts)),
+    )
+
+    # HITL wait node (interrupt)
+    graph.add_node(
+        "HITL",
+        wrap_node("HITL", node_hitl_wait_user_input()),
+    )
+
+    # Apply user input to query and loop back to retrieval
+    graph.add_node(
+        "apply_followup",
+        wrap_node("apply_followup", node_apply_followup()),
+    )
+
     graph.add_node(
         "answer", wrap_node("answer", node_generate_answer_stream(llm, prompts))
     )
     graph.add_node("fallback", wrap_node("fallback", node_fallback))
 
-    # Entry -> router -> parallel retrievals -> join -> rrf_rank -> topk_filter -> retrieve_route.
+    # Entry -> router -> parallel retrievals -> join -> rrf_rank -> topk_filter -> decide.
     graph.set_entry_point("retrieval_router")
     graph.add_edge("retrieval_router", "retrieve_bm25")
     graph.add_edge("retrieval_router", "retrieve_vec")
     graph.add_edge(["retrieve_bm25", "retrieve_vec"], "rrf_rank")
     graph.add_edge("rrf_rank", "topk_filter")
-    graph.add_edge("topk_filter", "retrieve_route")
+    graph.add_edge("topk_filter", "decide_next_action")
 
     def _router(state: GraphState) -> str:
-        retrieved = state.get("retrieved", [])
-        need = bool(state.get("need_clarification", False))
-        turn_count = int(state.get("turn_count", 0))
-        max_turns = int(state.get("max_turns", 2))
-
-        if (not retrieved or need) and turn_count >= max_turns:
-            nxt = "fallback"
-        elif need:
-            nxt = "ask"
-        else:
+        # Return the destination node name directly.
+        nxt = str(state.get("next_node", "answer") or "answer")
+        if nxt not in {"followup_question", "answer", "fallback"}:
             nxt = "answer"
-
-        logger.debug("[router] retrieve_route -> %s", nxt)
+        logger.debug("[router] decide_next_action -> %s", nxt)
         return nxt
 
+    # IMPORTANT: mapping keys == destination node names (no extra branch keys like "clarify").
     graph.add_conditional_edges(
-        "retrieve_route",
+        "decide_next_action",
         _router,
-        {"ask": "ask", "answer": "answer", "fallback": "fallback"},
+        {
+            "followup_question": "followup_question",
+            "answer": "answer",
+            "fallback": "fallback",
+        },
     )
-    graph.add_edge("ask", END)
+
+    # Follow-up loop visible in the graph:
+    # followup_question -> HITL -> apply_followup -> retrieval_router
+    graph.add_edge("followup_question", "HITL")
+    graph.add_edge("HITL", "apply_followup")
+    graph.add_edge("apply_followup", "retrieval_router")
+
     graph.add_edge("answer", END)
     graph.add_edge("fallback", END)
 
-    return graph.compile()
+    if checkpointer is None:
+        # A checkpointer is required for interrupt() to be resumable.
+        checkpointer = MemorySaver()
+
+    return graph.compile(checkpointer=checkpointer)
 
 
 class _NullLLM:

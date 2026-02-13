@@ -49,9 +49,11 @@ def node_retrieval_router():
         else:
             plan = "none"
 
-        user_query = shorten_text(state.get("user_query", ""), 120)
+        user_query = shorten_text(
+            state.get("search_query") or state.get("user_query", ""), 120
+        )
         logger.info(
-            '[retrieval-router] mode="%s" plan=%s reason=%s user_query="%s"',
+            '[retrieval-router] mode="%s" plan=%s reason=%s search_query="%s"',
             mode,
             plan,
             reason,
@@ -77,7 +79,7 @@ def node_retrieve_bm25(store: IndexedStore):
                 "bm25_count": 0,
             }
 
-        query = state["user_query"].strip()
+        query = str(state.get("search_query") or state.get("user_query") or "").strip()
         topk = max(1, get_env_int("BM25_TOPK", 10))
 
         bm25_scores = store.bm25_search(query, top_n=topk)
@@ -116,7 +118,7 @@ def node_retrieve_vec_threshold(store: IndexedStore):
                 "vec_pass_count": 0,
             }
 
-        query = state["user_query"].strip()
+        query = str(state.get("search_query") or state.get("user_query") or "").strip()
 
         search_topn = max(1, get_env_int("VEC_SEARCH_TOPN", 200))
         threshold = get_env_float("VEC_THRESHOLD", 0.35)

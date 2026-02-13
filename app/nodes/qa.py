@@ -5,10 +5,10 @@ from app.core.types import GraphState, MetaItem
 from app.prompts.loader import PromptLoader
 
 
-def node_ask_clarification(llm: Any, prompts: PromptLoader):
+def node_followup_question(llm: Any, prompts: PromptLoader):
     def _run(state: GraphState) -> GraphState:
         retrieved = state.get("retrieved", [])
-        user_query = state["user_query"]
+        user_query = str(state.get("user_query", "")).strip()
 
         snippets = []
         for r in retrieved[:3]:
@@ -34,12 +34,9 @@ def node_ask_clarification(llm: Any, prompts: PromptLoader):
 
         msg = llm.invoke(prompt)
         q = msg.content.strip()
-        turn_count = int(state.get("turn_count", 0)) + 1
         return {
-            **state,
             "clarifying_question": q,
             "need_clarification": True,
-            "turn_count": turn_count,
         }
 
     return _run
@@ -47,7 +44,7 @@ def node_ask_clarification(llm: Any, prompts: PromptLoader):
 
 def node_generate_answer_stream(llm: Any, prompts: PromptLoader):
     def _run(state: GraphState) -> GraphState:
-        user_query = state["user_query"]
+        user_query = str(state.get("user_query", "")).strip()
         retrieved = state.get("retrieved", [])[:5]
 
         sources_text = []
@@ -86,7 +83,6 @@ def node_generate_answer_stream(llm: Any, prompts: PromptLoader):
         sys.stdout.flush()
 
         return {
-            **state,
             "answer": "".join(full).strip(),
             "citations": citations,
             "need_clarification": False,
@@ -102,4 +98,4 @@ def node_fallback(state: GraphState) -> GraphState:
         "よろしければ、手続き名・画面名・エラーメッセージなど具体的な情報を教えてください。"
     )
     print(msg + "\n")
-    return {**state, "answer": msg, "need_clarification": False}
+    return {"answer": msg, "need_clarification": False}

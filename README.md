@@ -9,7 +9,7 @@ uv run python -m app.app --log-level info
 グラフ作成
 
 ```shell
-uv run python -m app.app --export-graph --log-level debug
+uv run python -m app.app --export-graph
 ```
 
 インデックス作成

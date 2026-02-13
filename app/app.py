@@ -2,8 +2,11 @@ import argparse
 import logging
 import os
 import sys
+import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
+
+from langgraph.types import Command
 
 from app.core.config import load_env_files, resolve_index_dir
 from app.core.llm import make_embeddings, make_llm
@@ -40,6 +43,40 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Output directory for graph artifacts when --export-graph is set (default: out).",
     )
     return parser.parse_args(argv)
+
+
+def _extract_interrupt_payload(result: Any) -> Optional[Any]:
+    if not isinstance(result, dict):
+        return None
+    interrupts = result.get("__interrupt__")
+    if not interrupts:
+        return None
+
+    first = interrupts
+    if isinstance(interrupts, (list, tuple)) and len(interrupts) > 0:
+        first = interrupts[0]
+
+    if hasattr(first, "value"):
+        return getattr(first, "value")
+
+    if isinstance(first, dict) and "value" in first:
+        return first.get("value")
+
+    return first
+
+
+def _payload_to_question(payload: Any) -> str:
+    if isinstance(payload, dict):
+        q = payload.get("question")
+        if isinstance(q, str) and q.strip():
+            return q.strip()
+        msg = payload.get("instruction") or payload.get("message")
+        if isinstance(msg, str) and msg.strip():
+            return msg.strip()
+        return str(payload)
+    if isinstance(payload, str):
+        return payload.strip()
+    return str(payload)
 
 
 def main() -> None:
@@ -93,28 +130,37 @@ def main() -> None:
         if user_query.lower() in {"exit", "quit"}:
             break
 
-        state: GraphState = {"user_query": user_query, "turn_count": 0, "max_turns": 2}
+        thread_config = {"configurable": {"thread_id": str(uuid.uuid4())}}
+
+        state: GraphState = {
+            "original_user_query": user_query,
+            "user_query": user_query,
+            "search_query": user_query,
+            "clarifications": [],
+            "turn_count": 0,
+            "max_turns": 2,
+        }
+
+        result: Any = graph_app.invoke(state, config=thread_config)
 
         while True:
-            result: GraphState = graph_app.invoke(state)
+            payload = _extract_interrupt_payload(result)
+            if payload is None:
+                # Answer/fallback already printed by nodes (streaming).
+                break
 
-            if result.get("need_clarification", False):
-                print(f"追加質問: {result.get('clarifying_question', '')}")
-                extra = input(">> ").strip()
-                if not extra:
-                    print("（空入力のため終了します）\n")
-                    break
-                state = {
-                    **state,
-                    "user_query": f"{state['user_query']}\n補足: {extra}",
-                    "turn_count": int(
-                        result.get("turn_count", state.get("turn_count", 0))
-                    ),
-                }
-                continue
+            question = _payload_to_question(payload)
+            print(f"追加質問: {question}")
+            extra = input(">> ").strip()
 
-            # Answer already streamed.
-            break
+            if not extra:
+                print("（空入力のため終了します）\n")
+                break
+            if extra.lower() in {"exit", "quit"}:
+                print("（終了します）\n")
+                return
+
+            result = graph_app.invoke(Command(resume=extra), config=thread_config)
 
 
 if __name__ == "__main__":

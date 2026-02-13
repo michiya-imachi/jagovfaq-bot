@@ -9,21 +9,18 @@ class MetaItem(TypedDict):
 
 
 class GraphState(TypedDict, total=False):
+    original_user_query: str
     user_query: str
+    search_query: str
 
-    # Retrieval planning
     run_bm25: bool
     run_vec: bool
     retrieval_plan_reason: str
 
-    # Raw retrieval outputs (optional)
     bm25_retrieved: List[Dict[str, Any]]
     vec_retrieved: List[Dict[str, Any]]
 
-    # All ranked candidates after RRF (pre TopK)
     rrf_ranked_all: List[Dict[str, Any]]
-
-    # Final candidates after TopK filter (used downstream by ask/answer)
     retrieved: List[Dict[str, Any]]
 
     answer: str
@@ -31,12 +28,15 @@ class GraphState(TypedDict, total=False):
 
     need_clarification: bool
     clarifying_question: str
+    clarifying_answer: str
+    clarifications: List[Dict[str, str]]
 
-    # Turn control
+    # Routing: destination node name ("followup_question" | "answer" | "fallback")
+    next_node: str
+
     turn_count: int
     max_turns: int
 
-    # Retrieval diagnostics (optional)
     bm25_count: int
     vec_count: int
     vec_pass_count: int
