@@ -6,7 +6,7 @@ from langgraph.graph import END, StateGraph
 
 from app.core.store import IndexedStore
 from app.core.types import GraphState
-from app.nodes.hitl import node_apply_followup, node_hitl_wait_user_input
+from app.nodes.hitl import node_hitl_wait_user_input
 from app.nodes.qa import (
     node_fallback,
     node_followup_question,
@@ -19,6 +19,7 @@ from app.nodes.retrieval import (
 )
 from app.nodes.rrf import node_rrf_rank
 from app.nodes.routing import node_decide_next_action
+from app.nodes.standalone_question import node_standalone_question
 from app.nodes.topk_filter import node_topk_filter
 from app.prompts.loader import PromptLoader
 
@@ -44,6 +45,11 @@ def build_graph(
     graph = StateGraph(GraphState)
 
     graph.add_node(
+        "standalone_question",
+        wrap_node("standalone_question", node_standalone_question(llm, prompts)),
+    )
+
+    graph.add_node(
         "retrieval_router", wrap_node("retrieval_router", node_retrieval_router())
     )
     graph.add_node(
@@ -67,31 +73,23 @@ def build_graph(
         wrap_node("decide_next_action", node_decide_next_action),
     )
 
-    # Follow-up question generation (LLM) - not HITL
     graph.add_node(
         "followup_question",
         wrap_node("followup_question", node_followup_question(llm, prompts)),
     )
 
-    # HITL wait node (interrupt)
-    graph.add_node(
-        "HITL",
-        wrap_node("HITL", node_hitl_wait_user_input()),
-    )
-
-    # Apply user input to query and loop back to retrieval
-    graph.add_node(
-        "apply_followup",
-        wrap_node("apply_followup", node_apply_followup()),
-    )
+    graph.add_node("HITL", wrap_node("HITL", node_hitl_wait_user_input()))
 
     graph.add_node(
         "answer", wrap_node("answer", node_generate_answer_stream(llm, prompts))
     )
     graph.add_node("fallback", wrap_node("fallback", node_fallback))
 
-    # Entry -> router -> parallel retrievals -> join -> rrf_rank -> topk_filter -> decide.
-    graph.set_entry_point("retrieval_router")
+    # Entry: always build/refresh the standalone search query first.
+    graph.set_entry_point("standalone_question")
+    graph.add_edge("standalone_question", "retrieval_router")
+
+    # Retrieval flow.
     graph.add_edge("retrieval_router", "retrieve_bm25")
     graph.add_edge("retrieval_router", "retrieve_vec")
     graph.add_edge(["retrieve_bm25", "retrieve_vec"], "rrf_rank")
@@ -99,14 +97,13 @@ def build_graph(
     graph.add_edge("topk_filter", "decide_next_action")
 
     def _router(state: GraphState) -> str:
-        # Return the destination node name directly.
         nxt = str(state.get("next_node", "answer") or "answer")
         if nxt not in {"followup_question", "answer", "fallback"}:
             nxt = "answer"
         logger.debug("[router] decide_next_action -> %s", nxt)
         return nxt
 
-    # IMPORTANT: mapping keys == destination node names (no extra branch keys like "clarify").
+    # IMPORTANT: the router returns the destination node name directly.
     graph.add_conditional_edges(
         "decide_next_action",
         _router,
@@ -117,17 +114,15 @@ def build_graph(
         },
     )
 
-    # Follow-up loop visible in the graph:
-    # followup_question -> HITL -> apply_followup -> retrieval_router
+    # HITL loop:
+    # followup_question -> HITL -> standalone_question -> retrieval_router ...
     graph.add_edge("followup_question", "HITL")
-    graph.add_edge("HITL", "apply_followup")
-    graph.add_edge("apply_followup", "retrieval_router")
+    graph.add_edge("HITL", "standalone_question")
 
     graph.add_edge("answer", END)
     graph.add_edge("fallback", END)
 
     if checkpointer is None:
-        # A checkpointer is required for interrupt() to be resumable.
         checkpointer = MemorySaver()
 
     return graph.compile(checkpointer=checkpointer)
@@ -146,7 +141,6 @@ class _NullLLM:
 
 
 def build_graph_for_export(prompts: PromptLoader):
-    # Build the graph without requiring OpenAI API key or local index files.
     dummy_store = IndexedStore(
         meta_by_id={},
         bm25=None,

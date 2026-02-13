@@ -1,0 +1,13 @@
+元のユーザ質問:
+${original_user_query}
+
+現在の検索用質問:
+${current_search_query}
+
+追加確認の質問（空の場合あり）:
+${followup_question}
+
+ユーザ回答（空の場合あり）:
+${followup_answer}
+
+出力:

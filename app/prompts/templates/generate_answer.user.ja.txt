@@ -1,0 +1,5 @@
+ユーザーの質問:
+${user_query}
+
+候補FAQ:
+${sources_text}

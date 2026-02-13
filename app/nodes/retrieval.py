@@ -26,7 +26,6 @@ def sorted_items_desc(m: Dict[int, float]) -> List[Tuple[int, float]]:
 
 def node_retrieval_router():
     def _run(state: GraphState) -> GraphState:
-        # Decide which retrievers to run based on env var RETRIEVAL_MODE.
         mode = str(os.getenv("RETRIEVAL_MODE", "")).strip().lower()
 
         if mode in {"bm25", "keyword"}:
@@ -49,18 +48,15 @@ def node_retrieval_router():
         else:
             plan = "none"
 
-        user_query = shorten_text(
-            state.get("search_query") or state.get("user_query", ""), 120
-        )
+        q = shorten_text(state.get("search_query", ""), 120)
         logger.info(
             '[retrieval-router] mode="%s" plan=%s reason=%s search_query="%s"',
             mode,
             plan,
             reason,
-            user_query,
+            q,
         )
 
-        # Return only updated keys to avoid conflicts.
         return {
             "run_bm25": bool(run_bm25),
             "run_vec": bool(run_vec),
@@ -73,13 +69,9 @@ def node_retrieval_router():
 def node_retrieve_bm25(store: IndexedStore):
     def _run(state: GraphState) -> GraphState:
         if not bool(state.get("run_bm25", True)):
-            # Return empty results to avoid stale data in iterative runs.
-            return {
-                "bm25_retrieved": [],
-                "bm25_count": 0,
-            }
+            return {"bm25_retrieved": [], "bm25_count": 0}
 
-        query = str(state.get("search_query") or state.get("user_query") or "").strip()
+        query = str(state.get("search_query", "")).strip()
         topk = max(1, get_env_int("BM25_TOPK", 10))
 
         bm25_scores = store.bm25_search(query, top_n=topk)
@@ -99,11 +91,7 @@ def node_retrieve_bm25(store: IndexedStore):
                 }
             )
 
-        # Return only updated keys to avoid conflicts in parallel execution.
-        return {
-            "bm25_retrieved": out,
-            "bm25_count": len(out),
-        }
+        return {"bm25_retrieved": out, "bm25_count": len(out)}
 
     return _run
 
@@ -111,14 +99,9 @@ def node_retrieve_bm25(store: IndexedStore):
 def node_retrieve_vec_threshold(store: IndexedStore):
     def _run(state: GraphState) -> GraphState:
         if not bool(state.get("run_vec", True)):
-            # Return empty results to avoid stale data in iterative runs.
-            return {
-                "vec_retrieved": [],
-                "vec_count": 0,
-                "vec_pass_count": 0,
-            }
+            return {"vec_retrieved": [], "vec_count": 0, "vec_pass_count": 0}
 
-        query = str(state.get("search_query") or state.get("user_query") or "").strip()
+        query = str(state.get("search_query", "")).strip()
 
         search_topn = max(1, get_env_int("VEC_SEARCH_TOPN", 200))
         threshold = get_env_float("VEC_THRESHOLD", 0.35)
@@ -140,7 +123,6 @@ def node_retrieve_vec_threshold(store: IndexedStore):
         if not use_fallback:
             picked = passed
         else:
-            # Fallback: keep top results to avoid empty candidate set.
             for rank, (rid, score) in enumerate(ranked[:fallback_topk], start=1):
                 picked.append((int(rid), float(score), int(rank)))
                 if len(picked) >= max_keep:
@@ -164,7 +146,6 @@ def node_retrieve_vec_threshold(store: IndexedStore):
 
         pass_count = sum(1 for r in out if r.get("vec_pass_threshold", False))
 
-        # Return only updated keys to avoid conflicts in parallel execution.
         return {
             "vec_retrieved": out,
             "vec_count": len(out),

@@ -19,50 +19,6 @@ def shorten_text(text: str, max_len: int) -> str:
     return s[: max_len - 1] + "…"
 
 
-def log_decision_debug(
-    state: GraphState,
-    retrieved: List[Dict[str, Any]],
-    need_clarification: bool,
-    next_node: str,
-    turn_count: int,
-    max_turns: int,
-) -> None:
-    try:
-        topk = int(os.getenv("ROUTE_LOG_TOPK", "5"))
-    except Exception:
-        topk = 5
-    if topk <= 0:
-        return
-
-    user_query = shorten_text(
-        state.get("search_query") or state.get("user_query", ""), 120
-    )
-    cand_count = len(retrieved)
-
-    top = retrieved[0] if retrieved else None
-    top_score = top.get("score") if isinstance(top, dict) else None
-    top_sources = ",".join(top.get("sources", [])) if isinstance(top, dict) else ""
-    top_vec_raw = top.get("vec_raw") if isinstance(top, dict) else None
-
-    top_score_str = (
-        f"{float(top_score):.4f}" if isinstance(top_score, (int, float)) else "None"
-    )
-    top_vec_str = (
-        f"{float(top_vec_raw):.3f}" if isinstance(top_vec_raw, (int, float)) else "None"
-    )
-
-    plan = f"bm25={bool(state.get('run_bm25', True))} vec={bool(state.get('run_vec', True))}"
-    plan_reason = shorten_text(state.get("retrieval_plan_reason", ""), 40)
-
-    logger.debug(
-        f"[decision] turn={turn_count}/{max_turns} "
-        f"need_clarification={need_clarification} next_node={next_node} "
-        f"plan={plan} plan_reason={plan_reason} "
-        f"candidates={cand_count} top_score={top_score_str} top_sources={top_sources} top_vec_raw={top_vec_str} "
-        f'search_query="{user_query}"'
-    )
-
-
 def node_decide_next_action(state: GraphState) -> GraphState:
     retrieved = state.get("retrieved", []) or []
     turn_count = int(state.get("turn_count", 0))
@@ -78,8 +34,8 @@ def node_decide_next_action(state: GraphState) -> GraphState:
         need = True
     else:
         top = retrieved[0]
-
         top_vec_raw = top.get("vec_raw")
+
         top_vec_ok = (
             isinstance(top_vec_raw, (int, float))
             and float(top_vec_raw) >= vec_threshold
@@ -111,25 +67,32 @@ def node_decide_next_action(state: GraphState) -> GraphState:
             else:
                 need = True
 
-    # IMPORTANT:
-    # Return the destination node name directly to avoid extra branch labels like "clarify".
     if (not retrieved or need) and turn_count >= max_turns:
         next_node = "fallback"
+        next_node_reason = "max_turns_reached"
     elif need:
         next_node = "followup_question"
+        next_node_reason = "need_followup"
     else:
         next_node = "answer"
+        next_node_reason = "enough_evidence"
 
-    log_decision_debug(
-        state=state,
-        retrieved=retrieved,
-        need_clarification=need,
-        next_node=next_node,
-        turn_count=turn_count,
-        max_turns=max_turns,
+    query = shorten_text(state.get("search_query", ""), 120)
+    logger.debug(
+        "[decide] turn=%d/%d need_followup=%s",
+        turn_count,
+        max_turns,
+        str(need),
+    )
+    logger.debug(
+        '[decide] next_node=%s reason=%s search_query="%s"',
+        next_node,
+        next_node_reason,
+        query,
     )
 
     return {
-        "need_clarification": bool(need),
+        "need_followup": bool(need),
         "next_node": str(next_node),
+        "next_node_reason": str(next_node_reason),
     }

@@ -70,9 +70,6 @@ def _payload_to_question(payload: Any) -> str:
         q = payload.get("question")
         if isinstance(q, str) and q.strip():
             return q.strip()
-        msg = payload.get("instruction") or payload.get("message")
-        if isinstance(msg, str) and msg.strip():
-            return msg.strip()
         return str(payload)
     if isinstance(payload, str):
         return payload.strip()
@@ -134,9 +131,9 @@ def main() -> None:
 
         state: GraphState = {
             "original_user_query": user_query,
-            "user_query": user_query,
             "search_query": user_query,
-            "clarifications": [],
+            "followup_question": "",
+            "followup_answer": "",
             "turn_count": 0,
             "max_turns": 2,
         }
@@ -146,7 +143,6 @@ def main() -> None:
         while True:
             payload = _extract_interrupt_payload(result)
             if payload is None:
-                # Answer/fallback already printed by nodes (streaming).
                 break
 
             question = _payload_to_question(payload)
