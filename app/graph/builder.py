@@ -4,6 +4,7 @@ from typing import Any, Optional
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
+from app.core.retriever import BM25Retriever, RetrieverRegistry, VectorRetriever
 from app.core.store import IndexedStore
 from app.core.types import GraphState
 from app.nodes.hitl import node_hitl_wait_user_input
@@ -14,8 +15,7 @@ from app.nodes.qa import (
 )
 from app.nodes.retrieval import (
     node_retrieval_router,
-    node_retrieve_bm25,
-    node_retrieve_vec_threshold,
+    node_retrieve_all,
 )
 from app.nodes.rrf import node_rrf_rank
 from app.nodes.routing import make_decide_next_action
@@ -37,9 +37,10 @@ def wrap_node(name: str, fn):
 
 
 def build_graph(
-    store: IndexedStore,
     llm: Any,
     prompts: PromptLoader,
+    retriever_registry: RetrieverRegistry,
+    default_retrievers: list[str],
     checkpointer: Optional[Any] = None,
 ):
     graph = StateGraph(GraphState)
@@ -50,13 +51,18 @@ def build_graph(
     )
 
     graph.add_node(
-        "retrieval_router", wrap_node("retrieval_router", node_retrieval_router())
+        "retrieval_router",
+        wrap_node(
+            "retrieval_router",
+            node_retrieval_router(
+                retriever_registry=retriever_registry,
+                default_retrievers=default_retrievers,
+            ),
+        ),
     )
     graph.add_node(
-        "retrieve_bm25", wrap_node("retrieve_bm25", node_retrieve_bm25(store))
-    )
-    graph.add_node(
-        "retrieve_vec", wrap_node("retrieve_vec", node_retrieve_vec_threshold(store))
+        "retrieve_all",
+        wrap_node("retrieve_all", node_retrieve_all(retriever_registry)),
     )
 
     graph.add_node("rrf_rank", wrap_node("rrf_rank", node_rrf_rank()))
@@ -64,7 +70,7 @@ def build_graph(
         "topk_filter",
         wrap_node(
             "topk_filter",
-            node_topk_filter(input_key="rrf_ranked_all", output_key="retrieved"),
+            node_topk_filter(input_key="merged_candidates_all", output_key="retrieved"),
         ),
     )
 
@@ -72,7 +78,7 @@ def build_graph(
         "decide_next_action",
         wrap_node(
             "decide_next_action",
-            make_decide_next_action(top_n=10, candidate_source="rrf_ranked_all"),
+            make_decide_next_action(top_n=10, candidate_source="merged_candidates_all"),
         ),
     )
 
@@ -93,9 +99,8 @@ def build_graph(
     graph.add_edge("standalone_question", "retrieval_router")
 
     # Retrieval flow.
-    graph.add_edge("retrieval_router", "retrieve_bm25")
-    graph.add_edge("retrieval_router", "retrieve_vec")
-    graph.add_edge(["retrieve_bm25", "retrieve_vec"], "rrf_rank")
+    graph.add_edge("retrieval_router", "retrieve_all")
+    graph.add_edge("retrieve_all", "rrf_rank")
     graph.add_edge("rrf_rank", "topk_filter")
     graph.add_edge("topk_filter", "decide_next_action")
 
@@ -152,4 +157,15 @@ def build_graph_for_export(prompts: PromptLoader):
         embeddings=None,
     )
     null_llm = _NullLLM()
-    return build_graph(store=dummy_store, llm=null_llm, prompts=prompts)
+    retriever_registry = RetrieverRegistry(
+        [
+            BM25Retriever(dummy_store),
+            VectorRetriever(dummy_store),
+        ]
+    )
+    return build_graph(
+        llm=null_llm,
+        prompts=prompts,
+        retriever_registry=retriever_registry,
+        default_retrievers=["bm25", "vec"],
+    )

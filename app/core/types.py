@@ -18,16 +18,15 @@ class GraphState(TypedDict, total=False):
     followup_answer: str
 
     # Retrieval planning
-    run_bm25: bool
-    run_vec: bool
+    requested_retrievers: List[str]
+    active_retrievers: List[str]
     retrieval_plan_reason: str
 
-    # Raw retrieval outputs (optional)
-    bm25_retrieved: List[Dict[str, Any]]
-    vec_retrieved: List[Dict[str, Any]]
+    # Retrieval outputs by source name (optional)
+    retrieval_results_by_source: Dict[str, List[Dict[str, Any]]]
 
-    # All ranked candidates after RRF (pre TopK)
-    rrf_ranked_all: List[Dict[str, Any]]
+    # All ranked candidates after RRF merge (pre TopK)
+    merged_candidates_all: List[Dict[str, Any]]
 
     # Final candidates after TopK filter (used downstream by ask/answer)
     retrieved: List[Dict[str, Any]]
@@ -45,6 +44,4 @@ class GraphState(TypedDict, total=False):
     max_turns: int
 
     # Retrieval diagnostics (optional)
-    bm25_count: int
-    vec_count: int
-    vec_pass_count: int
+    retrieval_counts: Dict[str, int]

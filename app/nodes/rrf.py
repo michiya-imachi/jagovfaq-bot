@@ -20,78 +20,69 @@ def shorten_text(text: Any, max_len: int) -> str:
 
 def node_rrf_rank():
     def _run(state: GraphState) -> GraphState:
-        # Merge by id -> compute RRF score -> sort ALL candidates -> log ALL at INFO.
-        bm25 = state.get("bm25_retrieved", []) or []
-        vec = state.get("vec_retrieved", []) or []
+        # Merge by id -> compute RRF score -> sort ALL candidates.
+        results_by_source = state.get("retrieval_results_by_source", {}) or {}
 
         rrf_k = max(1, get_env_int("RRF_K", 60))
         final_topk = max(1, get_env_int("FINAL_TOPK", 20))
 
         by_id: Dict[int, Dict[str, Any]] = {}
+        for source, rows in results_by_source.items():
+            for row in rows:
+                rid = int(row["id"])
+                it: MetaItem = row["item"]
+                rank = row.get("rank", None)
+                raw_score = row.get("raw_score", None)
+                passed = row.get("passed", None)
+                features = row.get("features", {}) or {}
 
-        for r in bm25:
-            rid = int(r["id"])
-            it: MetaItem = r["item"]
-            by_id[rid] = {
-                "id": rid,
-                "item": it,
-                "bm25_raw": r.get("bm25_raw"),
-                "bm25_rank": r.get("bm25_rank"),
-                "vec_raw": None,
-                "vec_rank": None,
-                "vec_pass_threshold": False,
-                "sources": ["bm25"],
-            }
+                if rid not in by_id:
+                    by_id[rid] = {
+                        "id": rid,
+                        "item": it,
+                        "sources": [],
+                        "source_details": {},
+                        "source_contrib": {},
+                    }
 
-        for r in vec:
-            rid = int(r["id"])
-            it: MetaItem = r["item"]
-            if rid not in by_id:
-                by_id[rid] = {
-                    "id": rid,
-                    "item": it,
-                    "bm25_raw": None,
-                    "bm25_rank": None,
-                    "vec_raw": r.get("vec_raw"),
-                    "vec_rank": r.get("vec_rank"),
-                    "vec_pass_threshold": bool(r.get("vec_pass_threshold", False)),
-                    "sources": ["vec"],
-                }
-            else:
-                by_id[rid]["vec_raw"] = r.get("vec_raw")
-                by_id[rid]["vec_rank"] = r.get("vec_rank")
-                by_id[rid]["vec_pass_threshold"] = bool(
-                    r.get("vec_pass_threshold", False)
+                if source not in by_id[rid]["sources"]:
+                    by_id[rid]["sources"].append(source)
+
+                safe_rank = int(rank) if isinstance(rank, int) and rank > 0 else None
+                safe_raw = (
+                    float(raw_score)
+                    if isinstance(raw_score, (int, float))
+                    else None
                 )
-                if "vec" not in by_id[rid]["sources"]:
-                    by_id[rid]["sources"].append("vec")
+                safe_passed = bool(passed) if isinstance(passed, bool) else None
+                by_id[rid]["source_details"][source] = {
+                    "rank": safe_rank,
+                    "raw_score": safe_raw,
+                    "passed": safe_passed,
+                    "features": dict(features),
+                }
+
+                contrib = 0.0
+                if isinstance(safe_rank, int) and safe_rank > 0:
+                    contrib = 1.0 / float(rrf_k + safe_rank)
+                by_id[rid]["source_contrib"][source] = float(contrib)
 
         organized: List[Dict[str, Any]] = []
-        for _, r in by_id.items():
-            bm25_rank = r.get("bm25_rank")
-            vec_rank = r.get("vec_rank")
-
-            bm25_contrib = 0.0
-            vec_contrib = 0.0
-
-            if isinstance(bm25_rank, int) and bm25_rank > 0:
-                bm25_contrib = 1.0 / float(rrf_k + bm25_rank)
-            if isinstance(vec_rank, int) and vec_rank > 0:
-                vec_contrib = 1.0 / float(rrf_k + vec_rank)
-
-            score = float(bm25_contrib + vec_contrib)
-
-            has_both = ("bm25" in r.get("sources", [])) and (
-                "vec" in r.get("sources", [])
+        for _, row in by_id.items():
+            contrib_map = row.get("source_contrib", {}) or {}
+            detail_map = row.get("source_details", {}) or {}
+            score = float(sum(float(v) for v in contrib_map.values()))
+            passed_any = any(
+                detail.get("passed") is True for detail in detail_map.values()
             )
+            has_multiple_sources = len(row.get("sources", [])) >= 2
 
             organized.append(
                 {
-                    **r,
-                    "has_both": bool(has_both),
+                    **row,
                     "score": score,
-                    "bm25_contrib": float(bm25_contrib),
-                    "vec_contrib": float(vec_contrib),
+                    "passed_any": bool(passed_any),
+                    "has_multiple_sources": bool(has_multiple_sources),
                 }
             )
 
@@ -101,92 +92,59 @@ def node_rrf_rank():
             r["final_rank"] = int(i)
             r["keep"] = bool(i <= final_topk)
 
-        run_bm25 = bool(state.get("run_bm25", True))
-        run_vec = bool(state.get("run_vec", True))
+        active = state.get("active_retrievers", []) or []
         reason = shorten_text(state.get("retrieval_plan_reason", ""), 60)
+        counts = state.get("retrieval_counts", {}) or {}
 
-        bm25_count = int(state.get("bm25_count", len(bm25)))
-        vec_count = int(state.get("vec_count", len(vec)))
-        vec_pass = int(state.get("vec_pass_count", 0))
-
-        user_query = shorten_text(state.get("user_query", ""), 120)
+        search_query = shorten_text(state.get("search_query", ""), 120)
 
         logger.info(
-            '[rrf-rank] plan=bm25=%s vec=%s reason=%s bm25_count=%d vec_count=%d vec_pass=%d rrf_k=%d final_topk=%d merged=%d user_query="%s"',
-            run_bm25,
-            run_vec,
+            '[rrf-rank] active=%s reason=%s counts=%s rrf_k=%d final_topk=%d merged=%d search_query="%s"',
+            ",".join([str(v) for v in active]),
             reason,
-            bm25_count,
-            vec_count,
-            vec_pass,
+            str(counts),
             rrf_k,
             final_topk,
             len(organized),
-            user_query,
+            search_query,
         )
 
         for r in organized:
             final_rank = int(r.get("final_rank", 0))
             keep = bool(r.get("keep", False))
-            rid = r.get("id", "")
-
-            score = r.get("score", None)
-            bm25_contrib = r.get("bm25_contrib", None)
-            vec_contrib = r.get("vec_contrib", None)
-
-            score_str = (
-                f"{float(score):.6f}" if isinstance(score, (int, float)) else "None"
+            rid = int(r.get("id", -1))
+            score = float(r.get("score", 0.0))
+            sources = ",".join([str(v) for v in r.get("sources", [])])
+            passed_any = bool(r.get("passed_any", False))
+            multi = bool(r.get("has_multiple_sources", False))
+            contrib_text = ",".join(
+                f"{k}:{float(v):.6f}"
+                for k, v in (r.get("source_contrib", {}) or {}).items()
             )
-            bm25_contrib_str = (
-                f"{float(bm25_contrib):.6f}"
-                if isinstance(bm25_contrib, (int, float))
-                else "-"
+            details = r.get("source_details", {}) or {}
+            detail_text = ",".join(
+                f"{source}(rank={detail.get('rank')} raw={detail.get('raw_score')} passed={detail.get('passed')})"
+                for source, detail in details.items()
             )
-            vec_contrib_str = (
-                f"{float(vec_contrib):.6f}"
-                if isinstance(vec_contrib, (int, float))
-                else "-"
-            )
-
-            sources = ",".join(r.get("sources", []))
-
-            bm25_rank = r.get("bm25_rank", None)
-            vec_rank = r.get("vec_rank", None)
-            bm25_raw = r.get("bm25_raw", None)
-            vec_raw = r.get("vec_raw", None)
-            vec_pass_threshold = bool(r.get("vec_pass_threshold", False))
-
-            bm25_rank_str = str(bm25_rank) if isinstance(bm25_rank, int) else "-"
-            vec_rank_str = str(vec_rank) if isinstance(vec_rank, int) else "-"
-            bm25_raw_str = (
-                f"{float(bm25_raw):.4f}" if isinstance(bm25_raw, (int, float)) else "-"
-            )
-            vec_raw_str = (
-                f"{float(vec_raw):.4f}" if isinstance(vec_raw, (int, float)) else "-"
-            )
-
-            it = r.get("item", {}) or {}
-            q = shorten_text(it.get("question", ""), 80)
-            url = shorten_text(it.get("url", ""), 160)
+            item = r.get("item", {}) or {}
+            q = shorten_text(item.get("question", ""), 80)
+            url = shorten_text(item.get("url", ""), 160)
 
             logger.info(
-                '[rrf-rank] #%d keep=%s id=%s score=%s bm25_contrib=%s vec_contrib=%s sources=%s bm25_rank=%s bm25_raw=%s vec_rank=%s vec_raw=%s vec_pass=%s Q="%s" url="%s"',
+                '[rrf-rank] #%d keep=%s id=%d score=%.6f sources=%s passed_any=%s multi=%s contribs="%s" details="%s" Q="%s" url="%s"',
                 final_rank,
                 str(keep),
-                str(rid),
-                score_str,
-                bm25_contrib_str,
-                vec_contrib_str,
+                rid,
+                score,
                 sources,
-                bm25_rank_str,
-                bm25_raw_str,
-                vec_rank_str,
-                vec_raw_str,
-                str(vec_pass_threshold),
+                str(passed_any),
+                str(multi),
+                contrib_text,
+                detail_text,
                 q,
                 url,
             )
 
-        return {"rrf_ranked_all": organized}
+        return {"merged_candidates_all": organized}
 
     return _run

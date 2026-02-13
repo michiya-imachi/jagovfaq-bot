@@ -4,13 +4,20 @@ import os
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Sequence, Tuple
 
 from langgraph.types import Command
 
 from app.core.config import load_env_files, resolve_index_dir
 from app.core.llm import make_embeddings, make_llm
 from app.core.logging import setup_logging
+from app.core.retriever import (
+    BM25Retriever,
+    RetrieverRegistry,
+    VectorRetriever,
+    normalize_retriever_names,
+    parse_retriever_names,
+)
 from app.core.store import IndexedStore
 from app.core.types import GraphState
 from app.graph.builder import build_graph, build_graph_for_export
@@ -19,6 +26,7 @@ from app.prompts.loader import PromptLoader
 
 
 LOG_LEVEL_CHOICES = ["debug", "info", "warning", "error", "critical"]
+DEFAULT_RETRIEVERS = ["bm25", "vec"]
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +50,36 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default="out",
         help="Output directory for graph artifacts when --export-graph is set (default: out).",
     )
+    parser.add_argument(
+        "--retrievers",
+        default=None,
+        help="Comma-separated retriever names. Example: bm25,vec",
+    )
     return parser.parse_args(argv)
+
+
+def resolve_retriever_selection(
+    cli_value: Optional[str],
+    env_value: Optional[str],
+    default_names: Sequence[str] = DEFAULT_RETRIEVERS,
+) -> Tuple[List[str], str]:
+    defaults = normalize_retriever_names(default_names)
+    if not defaults:
+        raise ValueError("default retriever list must not be empty.")
+
+    if cli_value is not None:
+        names = normalize_retriever_names(parse_retriever_names(cli_value))
+        if not names:
+            raise ValueError("No retrievers selected from --retrievers.")
+        return names, "cli"
+
+    if env_value is not None and str(env_value).strip():
+        names = normalize_retriever_names(parse_retriever_names(env_value))
+        if not names:
+            raise ValueError("No retrievers selected from RETRIEVERS.")
+        return names, "env"
+
+    return list(defaults), "default"
 
 
 def _extract_interrupt_payload(result: Any) -> Optional[Any]:
@@ -113,11 +150,35 @@ def main() -> None:
     store = IndexedStore.load(index_dir=index_dir, embeddings=embeddings)
 
     llm = make_llm()
-    graph_app = build_graph(store, llm, prompts)
+    retriever_registry = RetrieverRegistry(
+        [
+            BM25Retriever(store),
+            VectorRetriever(store),
+        ]
+    )
+    try:
+        selected_retrievers, selected_source = resolve_retriever_selection(
+            cli_value=args.retrievers,
+            env_value=os.getenv("RETRIEVERS"),
+            default_names=DEFAULT_RETRIEVERS,
+        )
+        # Validate selected names once at startup.
+        retriever_registry.select(selected_retrievers)
+    except ValueError as e:
+        logger.error("%s", e)
+        sys.exit(1)
+
+    graph_app = build_graph(
+        llm=llm,
+        prompts=prompts,
+        retriever_registry=retriever_registry,
+        default_retrievers=selected_retrievers,
+    )
 
     print("JaGov FAQ Bot - Indexed (BM25+FAISS) + Streaming Answer")
     print(f"Index: {index_dir}")
     print(f"Prompts: {prompts.prompt_dir}")
+    print(f"Retrievers ({selected_source}): {','.join(selected_retrievers)}")
     print("Type 'exit' to quit.\n")
 
     while True:
@@ -134,6 +195,7 @@ def main() -> None:
             "search_query": user_query,
             "followup_question": "",
             "followup_answer": "",
+            "requested_retrievers": list(selected_retrievers),
             "turn_count": 0,
             "max_turns": 2,
         }

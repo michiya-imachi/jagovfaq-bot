@@ -17,13 +17,16 @@ def node_followup_question(llm: Any, prompts: PromptLoader):
         snippets = []
         for r in retrieved[:3]:
             it: MetaItem = r["item"]
-            sources = ",".join(r.get("sources", []))
-            bm25_rank = r.get("bm25_rank", None)
-            vec_rank = r.get("vec_rank", None)
-            vec_raw = r.get("vec_raw", None)
+            sources = ",".join([str(v) for v in r.get("sources", [])])
+            score = float(r.get("score", 0.0))
+            details = r.get("source_details", {}) or {}
+            detail_text = ", ".join(
+                f"{source}(rank={detail.get('rank')} raw={detail.get('raw_score')} passed={detail.get('passed')})"
+                for source, detail in details.items()
+            )
 
             snippets.append(
-                f"- sources: {sources} bm25_rank: {bm25_rank} vec_rank: {vec_rank} vec_raw: {vec_raw}\n"
+                f"- sources: {sources} score: {score:.4f} details: {detail_text}\n"
                 f"  Q: {it['question']}\n"
                 f"  A: {it['answer'][:120]}...\n"
                 f"  URL: {it['url']}"
@@ -61,15 +64,15 @@ def node_generate_answer_stream(llm: Any, prompts: PromptLoader):
         for r in retrieved:
             it: MetaItem = r["item"]
             score = float(r.get("score", 0.0))
-            sources = ",".join(r.get("sources", []))
-            bm25_rank = r.get("bm25_rank", None)
-            vec_rank = r.get("vec_rank", None)
-            bm25_raw = r.get("bm25_raw", None)
-            vec_raw = r.get("vec_raw", None)
+            sources = ",".join([str(v) for v in r.get("sources", [])])
+            details = r.get("source_details", {}) or {}
+            detail_text = ", ".join(
+                f"{source}(rank={detail.get('rank')} raw={detail.get('raw_score')} passed={detail.get('passed')})"
+                for source, detail in details.items()
+            )
 
             sources_text.append(
-                f"[rrf_score={score:.4f} sources={sources} bm25_rank={bm25_rank} vec_rank={vec_rank} "
-                f"bm25_raw={bm25_raw} vec_raw={vec_raw}]\n"
+                f"[rrf_score={score:.4f} sources={sources} details={detail_text}]\n"
                 f"Q: {it['question']}\nA: {it['answer']}\nURL: {it['url']}\n"
             )
             citations.append({"url": it["url"], "question": it["question"]})

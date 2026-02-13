@@ -1,9 +1,7 @@
 import logging
-import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Sequence
 
-from app.core.config import get_env_float, get_env_int
-from app.core.store import IndexedStore
+from app.core.retriever import RetrieverRegistry, normalize_retriever_names, parse_retriever_names
 from app.core.types import GraphState
 
 
@@ -17,139 +15,74 @@ def shorten_text(text: Any, max_len: int) -> str:
     s = str(text).replace("\n", " ").strip()
     if len(s) <= max_len:
         return s
-    return s[: max_len - 1] + "…"
+    return s[: max_len - 1] + "..."
 
 
-def sorted_items_desc(m: Dict[int, float]) -> List[Tuple[int, float]]:
-    return sorted(m.items(), key=lambda x: x[1], reverse=True)
+def _names_from_value(value: Any) -> List[str]:
+    if isinstance(value, str):
+        return parse_retriever_names(value)
+    if isinstance(value, (list, tuple)):
+        return normalize_retriever_names([str(v) for v in value])
+    return []
 
 
-def node_retrieval_router():
+def node_retrieval_router(
+    retriever_registry: RetrieverRegistry, default_retrievers: Sequence[str]
+):
+    defaults = normalize_retriever_names(default_retrievers)
+    if not defaults:
+        raise ValueError("default_retrievers must not be empty.")
+
     def _run(state: GraphState) -> GraphState:
-        mode = str(os.getenv("RETRIEVAL_MODE", "")).strip().lower()
-
-        if mode in {"bm25", "keyword"}:
-            run_bm25, run_vec, reason = True, False, f"env:{mode}"
-        elif mode in {"vec", "vector"}:
-            run_bm25, run_vec, reason = False, True, f"env:{mode}"
+        requested = _names_from_value(state.get("requested_retrievers"))
+        if requested:
+            selected = retriever_registry.select(requested)
+            reason = "state:requested_retrievers"
         else:
-            run_bm25, run_vec, reason = (
-                True,
-                True,
-                ("env:both" if mode in {"both", "hybrid"} else "default_both"),
-            )
+            selected = retriever_registry.select(defaults)
+            reason = "default_retrievers"
 
-        if run_bm25 and run_vec:
-            plan = "bm25+vec"
-        elif run_bm25:
-            plan = "bm25_only"
-        elif run_vec:
-            plan = "vec_only"
-        else:
-            plan = "none"
+        active = [r.name for r in selected]
 
         q = shorten_text(state.get("search_query", ""), 120)
         logger.info(
-            '[retrieval-router] mode="%s" plan=%s reason=%s search_query="%s"',
-            mode,
-            plan,
+            '[retrieval-router] active=%s reason=%s search_query="%s"',
+            ",".join(active),
             reason,
             q,
         )
 
         return {
-            "run_bm25": bool(run_bm25),
-            "run_vec": bool(run_vec),
+            "active_retrievers": active,
             "retrieval_plan_reason": str(reason),
         }
 
     return _run
 
 
-def node_retrieve_bm25(store: IndexedStore):
+def node_retrieve_all(retriever_registry: RetrieverRegistry):
     def _run(state: GraphState) -> GraphState:
-        if not bool(state.get("run_bm25", True)):
-            return {"bm25_retrieved": [], "bm25_count": 0}
-
         query = str(state.get("search_query", "")).strip()
-        topk = max(1, get_env_int("BM25_TOPK", 10))
+        active = state.get("active_retrievers", []) or []
+        selected = retriever_registry.select([str(name) for name in active])
 
-        bm25_scores = store.bm25_search(query, top_n=topk)
-        ranked = sorted_items_desc(bm25_scores)
+        results_by_source: Dict[str, List[Dict[str, Any]]] = {}
+        counts: Dict[str, int] = {}
 
-        out: List[Dict[str, Any]] = []
-        for rank, (rid, score) in enumerate(ranked, start=1):
-            it = store.meta_by_id.get(int(rid))
-            if not it:
-                continue
-            out.append(
-                {
-                    "id": int(rid),
-                    "item": it,
-                    "bm25_raw": float(score),
-                    "bm25_rank": int(rank),
-                }
+        for retriever in selected:
+            rows = retriever.retrieve(query, state)
+            results_by_source[retriever.name] = list(rows)
+            counts[retriever.name] = len(rows)
+            logger.info(
+                '[retrieve] source=%s count=%d search_query="%s"',
+                retriever.name,
+                len(rows),
+                shorten_text(query, 120),
             )
-
-        return {"bm25_retrieved": out, "bm25_count": len(out)}
-
-    return _run
-
-
-def node_retrieve_vec_threshold(store: IndexedStore):
-    def _run(state: GraphState) -> GraphState:
-        if not bool(state.get("run_vec", True)):
-            return {"vec_retrieved": [], "vec_count": 0, "vec_pass_count": 0}
-
-        query = str(state.get("search_query", "")).strip()
-
-        search_topn = max(1, get_env_int("VEC_SEARCH_TOPN", 200))
-        threshold = get_env_float("VEC_THRESHOLD", 0.35)
-        max_keep = max(1, get_env_int("VEC_MAX_KEEP", 30))
-        fallback_topk = max(1, get_env_int("VEC_FALLBACK_TOPK", 30))
-
-        vec_scores = store.vec_search(query, top_n=search_topn)
-        ranked = sorted_items_desc(vec_scores)
-
-        passed: List[Tuple[int, float, int]] = []
-        for rank, (rid, score) in enumerate(ranked, start=1):
-            if float(score) >= threshold:
-                passed.append((int(rid), float(score), int(rank)))
-                if len(passed) >= max_keep:
-                    break
-
-        use_fallback = len(passed) == 0
-        picked: List[Tuple[int, float, int]] = []
-        if not use_fallback:
-            picked = passed
-        else:
-            for rank, (rid, score) in enumerate(ranked[:fallback_topk], start=1):
-                picked.append((int(rid), float(score), int(rank)))
-                if len(picked) >= max_keep:
-                    break
-
-        out: List[Dict[str, Any]] = []
-        for rid, score, rank in picked:
-            it = store.meta_by_id.get(int(rid))
-            if not it:
-                continue
-            out.append(
-                {
-                    "id": int(rid),
-                    "item": it,
-                    "vec_raw": float(score),
-                    "vec_rank": int(rank),
-                    "vec_pass_threshold": (not use_fallback)
-                    and (float(score) >= threshold),
-                }
-            )
-
-        pass_count = sum(1 for r in out if r.get("vec_pass_threshold", False))
 
         return {
-            "vec_retrieved": out,
-            "vec_count": len(out),
-            "vec_pass_count": int(pass_count),
+            "retrieval_results_by_source": results_by_source,
+            "retrieval_counts": counts,
         }
 
     return _run
