@@ -1,0 +1,11 @@
+ユーザーの質問:
+${user_query}
+
+注意メモ:
+${warning_notes}
+
+ローカルFAQ候補:
+${local_sources_text}
+
+Web検索結果:
+${web_sources_text}

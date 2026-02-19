@@ -45,3 +45,11 @@ def get_env_float(name: str, default: float) -> float:
         return float(os.getenv(name, str(default)))
     except Exception:
         return default
+
+
+def get_env_str(name: str, default: str) -> str:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    text = str(raw).strip()
+    return text if text else default

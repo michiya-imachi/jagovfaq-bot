@@ -34,10 +34,28 @@ class GraphState(TypedDict, total=False):
     answer: str
     citations: List[Dict[str, str]]
 
+    # Evidence assessment
+    local_evidence_level: str  # "high" | "low" | "none"
+    local_evidence_reason: str
+    web_needed: bool
+
+    # Web permission
+    web_permission_question: str
+    web_permission_answer: str
+    web_permission_asked: bool
+    web_search_allowed: bool
+    web_search_declined: bool
+
+    # Web search
+    web_query: str
+    web_results: List[Dict[str, Any]]
+    web_search_error: str
+    web_search_attempted: bool
+
     # Routing
     need_followup: bool
-    next_node: str  # "followup_question" | "answer" | "fallback"
-    next_node_reason: str  # e.g. "max_turns_reached" | "need_followup" | "enough_evidence"
+    next_node: str  # "followup_question" | "web_permission" | "answer" | "fallback"
+    next_node_reason: str  # e.g. "high_evidence_local_answer" | "force_web_check_multi_turn" | "need_followup"
 
     # Turn control
     turn_count: int

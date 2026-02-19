@@ -61,6 +61,10 @@ class PromptLoader:
                 "generate_answer.system.ja.txt",
                 "generate_answer.user.ja.txt",
             ),
+            "generate_answer_with_web": (
+                "generate_answer_with_web.system.ja.txt",
+                "generate_answer_with_web.user.ja.txt",
+            ),
             "standalone_question": (
                 "standalone_question.system.ja.txt",
                 "standalone_question.user.ja.txt",

@@ -9,7 +9,7 @@ from typing import Any, List, Optional, Sequence, Tuple
 from langgraph.types import Command
 
 from app.core.config import load_env_files, resolve_index_dir
-from app.core.llm import make_embeddings, make_llm
+from app.core.llm import make_embeddings, make_llm, make_openai_client
 from app.core.logging import setup_logging
 from app.core.retriever import (
     BM25Retriever,
@@ -113,6 +113,22 @@ def _payload_to_question(payload: Any) -> str:
     return str(payload)
 
 
+def _payload_to_type(payload: Any) -> str:
+    if isinstance(payload, dict):
+        t = payload.get("type")
+        if isinstance(t, str) and t.strip():
+            return t.strip()
+    return "HITL"
+
+
+def _interrupt_ui(payload: Any) -> Tuple[str, str]:
+    payload_type = _payload_to_type(payload)
+    question = _payload_to_question(payload)
+    if payload_type == "WEB_PERMISSION":
+        return f"Web検索確認: {question}", "(はい/いいえ) >> "
+    return f"追加質問: {question}", ">> "
+
+
 def main() -> None:
     args = parse_args()
     setup_logging(args.log_level)
@@ -150,6 +166,7 @@ def main() -> None:
     store = IndexedStore.load(index_dir=index_dir, embeddings=embeddings)
 
     llm = make_llm()
+    openai_client = make_openai_client()
     retriever_registry = RetrieverRegistry(
         [
             BM25Retriever(store),
@@ -170,6 +187,7 @@ def main() -> None:
 
     graph_app = build_graph(
         llm=llm,
+        openai_client=openai_client,
         prompts=prompts,
         retriever_registry=retriever_registry,
         default_retrievers=selected_retrievers,
@@ -195,6 +213,18 @@ def main() -> None:
             "search_query": user_query,
             "followup_question": "",
             "followup_answer": "",
+            "local_evidence_level": "",
+            "local_evidence_reason": "",
+            "web_needed": False,
+            "web_permission_question": "",
+            "web_permission_answer": "",
+            "web_permission_asked": False,
+            "web_search_allowed": False,
+            "web_search_declined": False,
+            "web_query": "",
+            "web_results": [],
+            "web_search_error": "",
+            "web_search_attempted": False,
             "requested_retrievers": list(selected_retrievers),
             "turn_count": 0,
             "max_turns": 2,
@@ -207,11 +237,12 @@ def main() -> None:
             if payload is None:
                 break
 
-            question = _payload_to_question(payload)
-            print(f"追加質問: {question}")
-            extra = input(">> ").strip()
+            payload_type = _payload_to_type(payload)
+            message, prompt = _interrupt_ui(payload)
+            print(message)
+            extra = input(prompt).strip()
 
-            if not extra:
+            if not extra and payload_type != "WEB_PERMISSION":
                 print("（空入力のため終了します）\n")
                 break
             if extra.lower() in {"exit", "quit"}:
