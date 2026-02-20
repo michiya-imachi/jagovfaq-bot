@@ -1,7 +1,7 @@
 import unittest
 
 from app.core.retriever import RetrieverRegistry
-from app.nodes.retrieval import node_retrieve_all
+from app.nodes.retrieval import node_retrieve_bm25, node_retrieve_vec_threshold
 
 
 class DummyRetriever:
@@ -13,62 +13,118 @@ class DummyRetriever:
         return list(self._rows)
 
 
-class RetrieveAllNodeTests(unittest.TestCase):
-    def test_collects_results_from_multiple_retrievers(self):
-        bm25 = DummyRetriever(
-            "bm25",
+class RetrieveSplitNodeTests(unittest.TestCase):
+    def test_bm25_collects_rows_and_count(self):
+        registry = RetrieverRegistry(
             [
-                {
-                    "id": 1,
-                    "item": {"id": 1, "question": "Q1", "answer": "A1", "url": "u1"},
-                    "retriever": "bm25",
-                    "raw_score": 1.2,
-                    "rank": 1,
-                    "passed": None,
-                    "features": {},
-                }
-            ],
+                DummyRetriever(
+                    "bm25",
+                    [
+                        {
+                            "id": 1,
+                            "item": {
+                                "id": 1,
+                                "question": "Q1",
+                                "answer": "A1",
+                                "url": "u1",
+                            },
+                            "retriever": "bm25",
+                            "raw_score": 1.2,
+                            "rank": 1,
+                            "passed": None,
+                            "features": {},
+                        }
+                    ],
+                ),
+                DummyRetriever("vec", []),
+            ]
         )
-        vec = DummyRetriever(
-            "vec",
-            [
-                {
-                    "id": 2,
-                    "item": {"id": 2, "question": "Q2", "answer": "A2", "url": "u2"},
-                    "retriever": "vec",
-                    "raw_score": 0.8,
-                    "rank": 1,
-                    "passed": True,
-                    "features": {},
-                }
-            ],
-        )
-        registry = RetrieverRegistry([bm25, vec])
-        run = node_retrieve_all(registry)
+        run = node_retrieve_bm25(registry)
 
-        out = run(
+        out = run({"search_query": "test", "run_bm25": True})
+
+        self.assertEqual(out["bm25_count"], 1)
+        self.assertEqual(len(out["bm25_retrieved"]), 1)
+        self.assertEqual(out["bm25_retrieved"][0]["id"], 1)
+        self.assertEqual(out["bm25_retrieved"][0]["bm25_rank"], 1)
+
+    def test_bm25_disabled_returns_empty(self):
+        registry = RetrieverRegistry([DummyRetriever("bm25", []), DummyRetriever("vec", [])])
+        run = node_retrieve_bm25(registry)
+
+        out = run({"search_query": "test", "run_bm25": False})
+
+        self.assertEqual(out, {"bm25_retrieved": [], "bm25_count": 0})
+
+    def test_vec_collects_rows_and_pass_count(self):
+        registry = RetrieverRegistry(
+            [
+                DummyRetriever("bm25", []),
+                DummyRetriever(
+                    "vec",
+                    [
+                        {
+                            "id": 2,
+                            "item": {
+                                "id": 2,
+                                "question": "Q2",
+                                "answer": "A2",
+                                "url": "u2",
+                            },
+                            "retriever": "vec",
+                            "raw_score": 0.8,
+                            "rank": 1,
+                            "passed": True,
+                            "features": {},
+                        },
+                        {
+                            "id": 3,
+                            "item": {
+                                "id": 3,
+                                "question": "Q3",
+                                "answer": "A3",
+                                "url": "u3",
+                            },
+                            "retriever": "vec",
+                            "raw_score": 0.1,
+                            "rank": 2,
+                            "passed": False,
+                            "features": {},
+                        },
+                    ],
+                ),
+            ]
+        )
+        run = node_retrieve_vec_threshold(registry)
+
+        out = run({"search_query": "test", "run_vec": True})
+
+        self.assertEqual(out["vec_count"], 2)
+        self.assertEqual(out["vec_pass_count"], 1)
+        self.assertEqual(out["vec_retrieved"][0]["vec_pass_threshold"], True)
+        self.assertEqual(out["vec_retrieved"][1]["vec_pass_threshold"], False)
+
+    def test_vec_disabled_returns_empty(self):
+        registry = RetrieverRegistry([DummyRetriever("bm25", []), DummyRetriever("vec", [])])
+        run = node_retrieve_vec_threshold(registry)
+
+        out = run({"search_query": "test", "run_vec": False})
+
+        self.assertEqual(
+            out,
             {
-                "search_query": "test",
-                "active_retrievers": ["bm25", "vec"],
-            }
+                "vec_retrieved": [],
+                "vec_count": 0,
+                "vec_pass_count": 0,
+            },
         )
 
-        self.assertIn("retrieval_results_by_source", out)
-        self.assertEqual(len(out["retrieval_results_by_source"]["bm25"]), 1)
-        self.assertEqual(len(out["retrieval_results_by_source"]["vec"]), 1)
-        self.assertEqual(out["retrieval_counts"], {"bm25": 1, "vec": 1})
-
-    def test_unknown_active_retriever_raises(self):
-        registry = RetrieverRegistry([DummyRetriever("bm25", [])])
-        run = node_retrieve_all(registry)
+    def test_missing_retriever_raises_on_factory(self):
+        with self.assertRaises(ValueError):
+            node_retrieve_bm25(RetrieverRegistry([DummyRetriever("vec", [])]))
 
         with self.assertRaises(ValueError):
-            run(
-                {
-                    "search_query": "test",
-                    "active_retrievers": ["foo"],
-                }
-            )
+            node_retrieve_vec_threshold(RetrieverRegistry([DummyRetriever("bm25", [])]))
 
 
 if __name__ == "__main__":

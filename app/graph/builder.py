@@ -16,7 +16,8 @@ from app.nodes.qa import (
 )
 from app.nodes.retrieval import (
     node_retrieval_router,
-    node_retrieve_all,
+    node_retrieve_bm25,
+    node_retrieve_vec_threshold,
 )
 from app.nodes.rrf import node_rrf_rank
 from app.nodes.routing import make_decide_next_action
@@ -64,8 +65,12 @@ def build_graph(
         ),
     )
     graph.add_node(
-        "retrieve_all",
-        wrap_node("retrieve_all", node_retrieve_all(retriever_registry)),
+        "retrieve_bm25",
+        wrap_node("retrieve_bm25", node_retrieve_bm25(retriever_registry)),
+    )
+    graph.add_node(
+        "retrieve_vec",
+        wrap_node("retrieve_vec", node_retrieve_vec_threshold(retriever_registry)),
     )
 
     graph.add_node("rrf_rank", wrap_node("rrf_rank", node_rrf_rank()))
@@ -114,8 +119,9 @@ def build_graph(
     graph.add_edge("standalone_question", "retrieval_router")
 
     # Retrieval flow.
-    graph.add_edge("retrieval_router", "retrieve_all")
-    graph.add_edge("retrieve_all", "rrf_rank")
+    graph.add_edge("retrieval_router", "retrieve_bm25")
+    graph.add_edge("retrieval_router", "retrieve_vec")
+    graph.add_edge(["retrieve_bm25", "retrieve_vec"], "rrf_rank")
     graph.add_edge("rrf_rank", "topk_filter")
     graph.add_edge("topk_filter", "evidence_assess")
     graph.add_edge("evidence_assess", "decide_next_action")
