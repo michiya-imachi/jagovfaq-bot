@@ -14,6 +14,13 @@ class GraphRetrievalSplitTests(unittest.TestCase):
         self.assertNotIn("retrieve_all", mermaid)
         self.assertIn("hitl_input_answer", mermaid)
         self.assertIn("hitl_permission_web", mermaid)
+        self.assertIn("evidence_rules_strict", mermaid)
+        self.assertIn("evidence_router", mermaid)
+        self.assertIn("evidence_llm_judge", mermaid)
+        self.assertIn("evidence_finalize", mermaid)
+        self.assertIn("response_router", mermaid)
+        self.assertNotIn("evidence_assess", mermaid)
+        self.assertNotIn("decide_next_action", mermaid)
         self.assertNotIn("HITL", mermaid)
 
 

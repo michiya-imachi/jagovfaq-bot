@@ -41,6 +41,15 @@ class GraphState(TypedDict, total=False):
     citations: List[Dict[str, str]]
 
     # Evidence assessment
+    evidence_rules_level: str  # "high" | "low" | "none"
+    evidence_rules_reason: str
+    run_evidence_llm: bool
+    evidence_route_reason: str
+    evidence_llm_level: str  # "high" | "low" | "none"
+    evidence_llm_action: str  # "answer" | "followup" | "web"
+    evidence_llm_reason: str
+    evidence_llm_error: str
+    evidence_action_hint: str  # "answer" | "followup" | "web"
     local_evidence_level: str  # "high" | "low" | "none"
     local_evidence_reason: str
     web_needed: bool
@@ -61,7 +70,7 @@ class GraphState(TypedDict, total=False):
     # Routing
     need_followup: bool
     next_node: str  # "followup_question" | "hitl_permission_web" | "answer" | "fallback"
-    next_node_reason: str  # e.g. "high_evidence_local_answer" | "force_web_check_multi_turn" | "need_followup"
+    next_node_reason: str  # e.g. "hint_answer" | "hint_web_need_permission" | "hint_followup"
 
     # Turn control
     turn_count: int

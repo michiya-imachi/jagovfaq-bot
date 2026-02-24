@@ -7,7 +7,10 @@ from langgraph.graph import END, StateGraph
 from app.core.retriever import BM25Retriever, RetrieverRegistry, VectorRetriever
 from app.core.store import IndexedStore
 from app.core.types import GraphState
-from app.nodes.evidence import node_evidence_assess
+from app.nodes.evidence_finalize import node_evidence_finalize
+from app.nodes.evidence_llm import node_evidence_llm_judge
+from app.nodes.evidence_router import node_evidence_router
+from app.nodes.evidence_rules_strict import node_evidence_rules_strict
 from app.nodes.hitl import node_hitl_wait_user_input
 from app.nodes.qa import (
     node_fallback,
@@ -20,7 +23,7 @@ from app.nodes.retrieval import (
     node_retrieve_vec_threshold,
 )
 from app.nodes.rrf import node_rrf_rank
-from app.nodes.routing import make_decide_next_action
+from app.nodes.routing import make_response_router
 from app.nodes.standalone_question import node_standalone_question
 from app.nodes.topk_filter import node_topk_filter
 from app.nodes.web import node_web_permission, node_web_search
@@ -82,15 +85,42 @@ def build_graph(
         ),
     )
     graph.add_node(
-        "evidence_assess",
-        wrap_node("evidence_assess", node_evidence_assess("merged_candidates_all")),
-    )
-
-    graph.add_node(
-        "decide_next_action",
+        "evidence_rules_strict",
         wrap_node(
-            "decide_next_action",
-            make_decide_next_action(top_n=10, candidate_source="merged_candidates_all"),
+            "evidence_rules_strict",
+            node_evidence_rules_strict("merged_candidates_all"),
+        ),
+    )
+    graph.add_node(
+        "evidence_router",
+        wrap_node(
+            "evidence_router",
+            node_evidence_router(),
+        ),
+    )
+    graph.add_node(
+        "evidence_llm_judge",
+        wrap_node(
+            "evidence_llm_judge",
+            node_evidence_llm_judge(
+                llm=llm,
+                prompts=prompts,
+                candidate_source="merged_candidates_all",
+            ),
+        ),
+    )
+    graph.add_node(
+        "evidence_finalize",
+        wrap_node(
+            "evidence_finalize",
+            node_evidence_finalize(),
+        ),
+    )
+    graph.add_node(
+        "response_router",
+        wrap_node(
+            "response_router",
+            make_response_router(),
         ),
     )
 
@@ -126,8 +156,25 @@ def build_graph(
     graph.add_edge("retrieval_router", "retrieve_vec")
     graph.add_edge(["retrieve_bm25", "retrieve_vec"], "rrf_rank")
     graph.add_edge("rrf_rank", "topk_filter")
-    graph.add_edge("topk_filter", "evidence_assess")
-    graph.add_edge("evidence_assess", "decide_next_action")
+    graph.add_edge("topk_filter", "evidence_rules_strict")
+    graph.add_edge("evidence_rules_strict", "evidence_router")
+
+    def _evidence_route(state: GraphState) -> str:
+        run_llm = bool(state.get("run_evidence_llm", False))
+        nxt = "evidence_llm_judge" if run_llm else "evidence_finalize"
+        logger.debug("[router] evidence_router -> %s", nxt)
+        return nxt
+
+    graph.add_conditional_edges(
+        "evidence_router",
+        _evidence_route,
+        {
+            "evidence_llm_judge": "evidence_llm_judge",
+            "evidence_finalize": "evidence_finalize",
+        },
+    )
+    graph.add_edge("evidence_llm_judge", "evidence_finalize")
+    graph.add_edge("evidence_finalize", "response_router")
 
     def _router(state: GraphState) -> str:
         nxt = str(state.get("next_node", "fallback") or "fallback")
@@ -138,12 +185,12 @@ def build_graph(
             "fallback",
         }:
             nxt = "fallback"
-        logger.debug("[router] decide_next_action -> %s", nxt)
+        logger.debug("[router] response_router -> %s", nxt)
         return nxt
 
     # IMPORTANT: the router returns the destination node name directly.
     graph.add_conditional_edges(
-        "decide_next_action",
+        "response_router",
         _router,
         {
             "followup_question": "followup_question",

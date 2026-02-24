@@ -224,7 +224,7 @@ def node_generate_answer_stream(llm: Any, prompts: PromptLoader):
 def node_fallback(state: GraphState) -> GraphState:
     reason = str(state.get("next_node_reason", "")).strip()
     note = ""
-    if reason == "max_turns_reached":
+    if reason in {"max_turns_reached", "hint_followup_max_turns"}:
         note = "\n(注記) 追加確認の上限回数に達したため、ここで終了しました。"
 
     msg = (

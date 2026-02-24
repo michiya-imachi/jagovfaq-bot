@@ -1,0 +1,5 @@
+質問:
+${search_query}
+
+候補:
+${candidates_text}

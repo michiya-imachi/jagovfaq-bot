@@ -31,5 +31,16 @@ CLI未指定時は `RETRIEVERS` 環境変数を参照し、未設定なら `bm25
   - Max retry attempts for OpenAI web search calls.
   - Clamped to `0..5`.
 
+## Evidence judge environment variables
+
+- `EVIDENCE_TOPN` (default: `10`)
+  - Candidate window for strict rules (`evidence_rules_strict`).
+- `EVIDENCE_LLM_TOPN` (default: `5`)
+  - Candidate window sent to LLM judgment (`evidence_llm_judge`).
+- `EVIDENCE_LLM_MODEL` (default: `OPENAI_MODEL`)
+  - Optional override model for evidence LLM judgment.
+- `EVIDENCE_LLM_TIMEOUT_S` (default: `25.0`)
+  - Per-request timeout in seconds for evidence LLM judgment.
+
 When web search fails (for example timeout or connection errors), the bot continues
 answer generation using local FAQ evidence only.

@@ -1,5 +1,4 @@
 import logging
-from typing import Any, Dict, List
 
 from app.core.types import GraphState
 
@@ -17,21 +16,7 @@ def shorten_text(text: str, max_len: int) -> str:
     return s[: max_len - 1] + "..."
 
 
-def _infer_level_from_candidates(
-    state: GraphState, top_n: int, candidate_source: str
-) -> str:
-    source_key = str(candidate_source or "merged_candidates_all")
-    source_items = state.get(source_key, []) or []
-    candidates: List[Dict[str, Any]] = source_items[: max(1, int(top_n))]
-    if not candidates:
-        return "none"
-
-    any_passed = any(bool(r.get("passed_any", False)) for r in candidates)
-    any_multi = any(bool(r.get("has_multiple_sources", False)) for r in candidates)
-    return "high" if (any_passed or any_multi) else "low"
-
-
-def make_decide_next_action(top_n: int = 1, candidate_source: str = "merged_candidates_all"):
+def make_response_router():
     def _run(state: GraphState) -> GraphState:
         turn_count = int(state.get("turn_count", 0))
         max_turns = int(state.get("max_turns", 2))
@@ -39,73 +24,72 @@ def make_decide_next_action(top_n: int = 1, candidate_source: str = "merged_cand
         hitl_permission_web_asked = bool(
             state.get("hitl_permission_web_asked", False)
         )
-        can_ask_web_permission = (not web_search_attempted) and (
-            not hitl_permission_web_asked
+        web_search_declined = bool(state.get("web_search_declined", False))
+        can_ask_web_permission = (
+            (not web_search_attempted)
+            and (not hitl_permission_web_asked)
+            and (not web_search_declined)
         )
 
-        raw_level = str(state.get("local_evidence_level", "") or "").strip().lower()
-        if raw_level in {"high", "low", "none"}:
-            level = raw_level
+        raw_hint = str(state.get("evidence_action_hint", "") or "").strip().lower()
+        if raw_hint in {"answer", "followup", "web"}:
+            hint = raw_hint
+            hint_valid = True
         else:
-            level = _infer_level_from_candidates(state, top_n, candidate_source)
+            hint = "followup"
+            hint_valid = False
 
-        web_needed_state = state.get("web_needed", None)
-        if isinstance(web_needed_state, bool):
-            web_needed = bool(web_needed_state)
-        else:
-            web_needed = level in {"none", "low"}
-
-        forced_multi_turn_web_check = turn_count >= 2 and can_ask_web_permission
-
-        if level == "high":
+        if hint == "answer":
             next_node = "answer"
-            next_node_reason = "high_evidence_local_answer"
-            need = False
-        elif forced_multi_turn_web_check:
-            next_node = "hitl_permission_web"
-            next_node_reason = "force_web_check_multi_turn"
-            need = False
-        elif web_needed and can_ask_web_permission:
-            next_node = "hitl_permission_web"
-            next_node_reason = "need_web_permission"
-            need = False
-        elif turn_count >= max_turns:
-            next_node = "fallback"
-            next_node_reason = "max_turns_reached"
-            need = True
+            next_node_reason = "hint_answer"
+            need_followup = False
+        elif hint == "web":
+            if can_ask_web_permission:
+                next_node = "hitl_permission_web"
+                next_node_reason = "hint_web_need_permission"
+            else:
+                next_node = "answer"
+                next_node_reason = "hint_web_cannot_ask_answer"
+            need_followup = False
         else:
-            next_node = "followup_question"
-            next_node_reason = "need_followup"
-            need = True
+            if turn_count < max_turns:
+                next_node = "followup_question"
+                next_node_reason = "hint_followup" if hint_valid else "hint_invalid_followup"
+                need_followup = True
+            else:
+                next_node = "fallback"
+                next_node_reason = "hint_followup_max_turns"
+                need_followup = True
 
         query = shorten_text(state.get("search_query", ""), 120)
         logger.debug(
-            "[decide] level=%s web_needed=%s turn=%d/%d need_followup=%s asked=%s attempted=%s forced=%s",
-            level,
-            str(web_needed),
+            "[response-router] hint=%s hint_valid=%s turn=%d/%d need_followup=%s asked=%s attempted=%s declined=%s",
+            hint,
+            str(hint_valid),
             turn_count,
             max_turns,
-            str(need),
+            str(need_followup),
             str(hitl_permission_web_asked),
             str(web_search_attempted),
-            str(forced_multi_turn_web_check),
+            str(web_search_declined),
         )
         logger.debug(
-            '[decide] next_node=%s reason=%s search_query="%s"',
+            '[response-router] next_node=%s reason=%s search_query="%s"',
             next_node,
             next_node_reason,
             query,
         )
         logger.info(
-            "[decide] turn_count=%d hitl_permission_web_asked=%s web_search_attempted=%s forced_multi_turn_web_check=%s",
+            "[response-router] hint=%s turn_count=%d hitl_permission_web_asked=%s web_search_attempted=%s web_search_declined=%s",
+            hint,
             turn_count,
             str(hitl_permission_web_asked),
             str(web_search_attempted),
-            str(forced_multi_turn_web_check),
+            str(web_search_declined),
         )
 
         return {
-            "need_followup": bool(need),
+            "need_followup": bool(need_followup),
             "next_node": str(next_node),
             "next_node_reason": str(next_node_reason),
         }
@@ -113,6 +97,5 @@ def make_decide_next_action(top_n: int = 1, candidate_source: str = "merged_cand
     return _run
 
 
-def node_decide_next_action(state: GraphState) -> GraphState:
-    # Keep backward compatibility for direct imports/tests.
-    return make_decide_next_action(top_n=1, candidate_source="merged_candidates_all")(state)
+def node_response_router(state: GraphState) -> GraphState:
+    return make_response_router()(state)

@@ -57,6 +57,10 @@ class PromptLoader:
                 "ask_clarification.system.ja.txt",
                 "ask_clarification.user.ja.txt",
             ),
+            "evidence_judge": (
+                "evidence_judge.system.ja.txt",
+                "evidence_judge.user.ja.txt",
+            ),
             "generate_answer": (
                 "generate_answer.system.ja.txt",
                 "generate_answer.user.ja.txt",
