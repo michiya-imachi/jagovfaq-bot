@@ -92,7 +92,7 @@ def node_web_permission():
             "ローカルFAQだけでは根拠が不足しました。"
             "Web検索して確認してもよろしいですか？（はい/いいえ）"
         )
-        payload = {"type": "WEB_PERMISSION", "question": question}
+        payload = {"type": "HITL_PERMISSION_WEB", "question": question}
         raw_answer = interrupt(payload)
         answer_text = str(raw_answer or "").strip()
         allowed = _normalize_yes_no(answer_text)
@@ -107,9 +107,9 @@ def node_web_permission():
         )
 
         return {
-            "web_permission_question": question,
-            "web_permission_answer": answer_text,
-            "web_permission_asked": True,
+            "hitl_permission_web_question": question,
+            "hitl_permission_web_answer": answer_text,
+            "hitl_permission_web_asked": True,
             "web_search_allowed": bool(allowed),
             "web_search_declined": bool(declined),
         }

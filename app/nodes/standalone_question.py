@@ -23,7 +23,7 @@ def node_standalone_question(llm: Any, prompts: PromptLoader):
         current = str(state.get("search_query", "")).strip() or original
 
         followup_q = str(state.get("followup_question", "")).strip()
-        followup_a = str(state.get("followup_answer", "")).strip()
+        followup_a = str(state.get("hitl_input_answer", "")).strip()
         has_followup_answer = bool(followup_a)
         reason = "with_followup" if has_followup_answer else "first_pass"
         if has_followup_answer and not followup_q:
@@ -60,7 +60,7 @@ def node_standalone_question(llm: Any, prompts: PromptLoader):
                 "search_query": new_q,
                 "turn_count": turn_count,
                 "followup_question": "",
-                "followup_answer": "",
+                "hitl_input_answer": "",
             }
 
         logger.info(

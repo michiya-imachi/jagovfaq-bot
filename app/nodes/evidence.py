@@ -36,7 +36,8 @@ def node_evidence_assess(candidate_source: str = "merged_candidates_all"):
                 level = "low"
                 reason = "no_passed_or_multi"
 
-        web_needed = level in {"none", "low"} and turn_count >= 1
+        # Low/none evidence should be eligible for web check from the first turn.
+        web_needed = level in {"none", "low"}
 
         logger.info(
             "[evidence-assess] source=%s topn=%d candidates=%d level=%s reason=%s turn_count=%d web_needed=%s",

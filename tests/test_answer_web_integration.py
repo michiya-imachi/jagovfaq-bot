@@ -103,6 +103,5 @@ class AnswerWebIntegrationTests(unittest.TestCase):
             out_zero = run(state_zero)
         self.assertIn("Web検索でも確証が得られませんでした", out_zero["answer"])
 
-
 if __name__ == "__main__":
     unittest.main()

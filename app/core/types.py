@@ -13,9 +13,9 @@ class GraphState(TypedDict, total=False):
     original_user_query: str
     search_query: str
 
-    # HITL follow-up (single-turn buffer)
+    # Follow-up question + HITL answer (single-turn buffer)
     followup_question: str
-    followup_answer: str
+    hitl_input_answer: str
 
     # Retrieval planning
     requested_retrievers: List[str]
@@ -45,10 +45,10 @@ class GraphState(TypedDict, total=False):
     local_evidence_reason: str
     web_needed: bool
 
-    # Web permission
-    web_permission_question: str
-    web_permission_answer: str
-    web_permission_asked: bool
+    # HITL web permission
+    hitl_permission_web_question: str
+    hitl_permission_web_answer: str
+    hitl_permission_web_asked: bool
     web_search_allowed: bool
     web_search_declined: bool
 
@@ -60,7 +60,7 @@ class GraphState(TypedDict, total=False):
 
     # Routing
     need_followup: bool
-    next_node: str  # "followup_question" | "web_permission" | "answer" | "fallback"
+    next_node: str  # "followup_question" | "hitl_permission_web" | "answer" | "fallback"
     next_node_reason: str  # e.g. "high_evidence_local_answer" | "force_web_check_multi_turn" | "need_followup"
 
     # Turn control

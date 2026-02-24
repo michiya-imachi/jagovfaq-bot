@@ -12,6 +12,9 @@ class GraphRetrievalSplitTests(unittest.TestCase):
         self.assertIn("retrieve_bm25", mermaid)
         self.assertIn("retrieve_vec", mermaid)
         self.assertNotIn("retrieve_all", mermaid)
+        self.assertIn("hitl_input_answer", mermaid)
+        self.assertIn("hitl_permission_web", mermaid)
+        self.assertNotIn("HITL", mermaid)
 
 
 if __name__ == "__main__":

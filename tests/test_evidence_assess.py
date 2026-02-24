@@ -38,7 +38,7 @@ class EvidenceAssessTests(unittest.TestCase):
         self.assertEqual(out["local_evidence_level"], "low")
         self.assertTrue(out["web_needed"])
 
-    def test_turn_zero_does_not_require_web(self):
+    def test_turn_zero_requires_web_when_low_evidence(self):
         run = node_evidence_assess(candidate_source="merged_candidates_all")
         out = run(
             {
@@ -49,7 +49,7 @@ class EvidenceAssessTests(unittest.TestCase):
             }
         )
         self.assertEqual(out["local_evidence_level"], "low")
-        self.assertFalse(out["web_needed"])
+        self.assertTrue(out["web_needed"])
 
     def test_topn_is_respected(self):
         run = node_evidence_assess(candidate_source="merged_candidates_all")

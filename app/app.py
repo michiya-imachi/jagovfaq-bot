@@ -118,13 +118,13 @@ def _payload_to_type(payload: Any) -> str:
         t = payload.get("type")
         if isinstance(t, str) and t.strip():
             return t.strip()
-    return "HITL"
+    return "HITL_INPUT_ANSWER"
 
 
 def _interrupt_ui(payload: Any) -> Tuple[str, str]:
     payload_type = _payload_to_type(payload)
     question = _payload_to_question(payload)
-    if payload_type == "WEB_PERMISSION":
+    if payload_type == "HITL_PERMISSION_WEB":
         return f"Web検索確認: {question}", "(はい/いいえ) >> "
     return f"追加質問: {question}", ">> "
 
@@ -212,13 +212,13 @@ def main() -> None:
             "original_user_query": user_query,
             "search_query": user_query,
             "followup_question": "",
-            "followup_answer": "",
+            "hitl_input_answer": "",
             "local_evidence_level": "",
             "local_evidence_reason": "",
             "web_needed": False,
-            "web_permission_question": "",
-            "web_permission_answer": "",
-            "web_permission_asked": False,
+            "hitl_permission_web_question": "",
+            "hitl_permission_web_answer": "",
+            "hitl_permission_web_asked": False,
             "web_search_allowed": False,
             "web_search_declined": False,
             "web_query": "",
@@ -242,7 +242,7 @@ def main() -> None:
             print(message)
             extra = input(prompt).strip()
 
-            if not extra and payload_type != "WEB_PERMISSION":
+            if not extra and payload_type != "HITL_PERMISSION_WEB":
                 print("（空入力のため終了します）\n")
                 break
             if extra.lower() in {"exit", "quit"}:

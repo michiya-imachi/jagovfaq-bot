@@ -99,10 +99,13 @@ def build_graph(
         wrap_node("followup_question", node_followup_question(llm, prompts)),
     )
 
-    graph.add_node("HITL", wrap_node("HITL", node_hitl_wait_user_input()))
     graph.add_node(
-        "web_permission",
-        wrap_node("web_permission", node_web_permission()),
+        "hitl_input_answer",
+        wrap_node("hitl_input_answer", node_hitl_wait_user_input()),
+    )
+    graph.add_node(
+        "hitl_permission_web",
+        wrap_node("hitl_permission_web", node_web_permission()),
     )
     graph.add_node(
         "web_search",
@@ -128,7 +131,12 @@ def build_graph(
 
     def _router(state: GraphState) -> str:
         nxt = str(state.get("next_node", "fallback") or "fallback")
-        if nxt not in {"followup_question", "web_permission", "answer", "fallback"}:
+        if nxt not in {
+            "followup_question",
+            "hitl_permission_web",
+            "answer",
+            "fallback",
+        }:
             nxt = "fallback"
         logger.debug("[router] decide_next_action -> %s", nxt)
         return nxt
@@ -139,18 +147,18 @@ def build_graph(
         _router,
         {
             "followup_question": "followup_question",
-            "web_permission": "web_permission",
+            "hitl_permission_web": "hitl_permission_web",
             "answer": "answer",
             "fallback": "fallback",
         },
     )
 
     # HITL loop:
-    # followup_question -> HITL -> standalone_question -> retrieval_router ...
-    graph.add_edge("followup_question", "HITL")
-    graph.add_edge("HITL", "standalone_question")
+    # followup_question -> hitl_input_answer -> standalone_question -> retrieval_router ...
+    graph.add_edge("followup_question", "hitl_input_answer")
+    graph.add_edge("hitl_input_answer", "standalone_question")
     graph.add_conditional_edges(
-        "web_permission",
+        "hitl_permission_web",
         lambda state: "web_search"
         if bool(state.get("web_search_allowed", False))
         else "answer",
