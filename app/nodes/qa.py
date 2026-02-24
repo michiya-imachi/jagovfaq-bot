@@ -41,7 +41,6 @@ def _build_local_sources(retrieved: List[Dict[str, Any]]) -> Tuple[str, List[Dic
 
     for r in retrieved:
         it: MetaItem = r["item"]
-        score = float(r.get("score", 0.0))
         sources = ",".join([str(v) for v in r.get("sources", [])])
         details = r.get("source_details", {}) or {}
         detail_text = ", ".join(
@@ -50,7 +49,7 @@ def _build_local_sources(retrieved: List[Dict[str, Any]]) -> Tuple[str, List[Dic
         )
 
         sources_text.append(
-            f"[rrf_score={score:.4f} sources={sources} details={detail_text}]\n"
+            f"[sources={sources} details={detail_text}]\n"
             f"Q: {it['question']}\nA: {it['answer']}\nURL: {it['url']}\n"
         )
         citations.append({"url": it["url"], "question": it["question"]})
@@ -111,7 +110,6 @@ def node_followup_question(llm: Any, prompts: PromptLoader):
         for r in retrieved[:3]:
             it: MetaItem = r["item"]
             sources = ",".join([str(v) for v in r.get("sources", [])])
-            score = float(r.get("score", 0.0))
             details = r.get("source_details", {}) or {}
             detail_text = ", ".join(
                 f"{source}(rank={detail.get('rank')} raw={detail.get('raw_score')} passed={detail.get('passed')})"
@@ -119,7 +117,7 @@ def node_followup_question(llm: Any, prompts: PromptLoader):
             )
 
             snippets.append(
-                f"- sources: {sources} score: {score:.4f} details: {detail_text}\n"
+                f"- sources: {sources} details: {detail_text}\n"
                 f"  Q: {it['question']}\n"
                 f"  A: {it['answer'][:120]}...\n"
                 f"  URL: {it['url']}"

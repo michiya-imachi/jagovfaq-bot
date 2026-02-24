@@ -40,10 +40,10 @@ class EvidenceLlmJudgeTests(unittest.TestCase):
             {
                 "run_evidence_llm": True,
                 "search_query": "test query",
-                "merged_candidates_all": [
+                "retrieved": [
                     {
                         "final_rank": 1,
-                        "score": 0.5,
+                        "rrf_score": 0.5,
                         "sources": ["bm25", "vec"],
                         "passed_any": True,
                         "has_multiple_sources": True,
@@ -73,7 +73,7 @@ class EvidenceLlmJudgeTests(unittest.TestCase):
         prompts = _DummyPrompts()
         run = node_evidence_llm_judge(llm=llm, prompts=prompts)
 
-        out = run({"run_evidence_llm": True, "merged_candidates_all": []})
+        out = run({"run_evidence_llm": True, "retrieved": []})
 
         self.assertEqual(out["evidence_llm_level"], "")
         self.assertEqual(out["evidence_llm_action"], "")
@@ -87,7 +87,7 @@ class EvidenceLlmJudgeTests(unittest.TestCase):
         prompts = _DummyPrompts()
         run = node_evidence_llm_judge(llm=llm, prompts=prompts)
 
-        out = run({"run_evidence_llm": True, "merged_candidates_all": []})
+        out = run({"run_evidence_llm": True, "retrieved": []})
 
         self.assertEqual(out["evidence_llm_level"], "")
         self.assertIn("ValueError", out["evidence_llm_error"])
@@ -100,7 +100,7 @@ class EvidenceLlmJudgeTests(unittest.TestCase):
         prompts = _DummyPrompts()
         run = node_evidence_llm_judge(llm=llm, prompts=prompts)
 
-        out = run({"run_evidence_llm": False, "merged_candidates_all": []})
+        out = run({"run_evidence_llm": False, "retrieved": []})
 
         self.assertEqual(out, {})
         self.assertEqual(len(llm.calls), 0)

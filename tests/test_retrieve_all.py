@@ -47,6 +47,7 @@ class RetrieveSplitNodeTests(unittest.TestCase):
         self.assertEqual(len(out["bm25_retrieved"]), 1)
         self.assertEqual(out["bm25_retrieved"][0]["id"], 1)
         self.assertEqual(out["bm25_retrieved"][0]["bm25_rank"], 1)
+        self.assertNotIn("item", out["bm25_retrieved"][0])
 
     def test_bm25_disabled_returns_empty(self):
         registry = RetrieverRegistry([DummyRetriever("bm25", []), DummyRetriever("vec", [])])
@@ -103,6 +104,7 @@ class RetrieveSplitNodeTests(unittest.TestCase):
         self.assertEqual(out["vec_pass_count"], 1)
         self.assertEqual(out["vec_retrieved"][0]["vec_pass_threshold"], True)
         self.assertEqual(out["vec_retrieved"][1]["vec_pass_threshold"], False)
+        self.assertNotIn("item", out["vec_retrieved"][0])
 
     def test_vec_disabled_returns_empty(self):
         registry = RetrieverRegistry([DummyRetriever("bm25", []), DummyRetriever("vec", [])])

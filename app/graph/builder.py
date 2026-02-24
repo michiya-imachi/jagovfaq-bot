@@ -22,6 +22,7 @@ from app.nodes.retrieval import (
     node_retrieve_bm25,
     node_retrieve_vec_threshold,
 )
+from app.nodes.restore_topk_meta import node_restore_topk_meta
 from app.nodes.rrf import node_rrf_rank
 from app.nodes.routing import make_response_router
 from app.nodes.standalone_question import node_standalone_question
@@ -49,7 +50,16 @@ def build_graph(
     retriever_registry: RetrieverRegistry,
     default_retrievers: list[str],
     checkpointer: Optional[Any] = None,
+    store: Optional[IndexedStore] = None,
 ):
+    if store is None:
+        # Keep backward compatibility with previous build_graph() call sites.
+        bm25_retriever = retriever_registry.get("bm25")
+        inferred_store = getattr(bm25_retriever, "store", None)
+        if not isinstance(inferred_store, IndexedStore):
+            raise ValueError("store is required for restore/evidence strict nodes")
+        store = inferred_store
+
     graph = StateGraph(GraphState)
 
     graph.add_node(
@@ -85,10 +95,20 @@ def build_graph(
         ),
     )
     graph.add_node(
+        "restore_topk_meta",
+        wrap_node(
+            "restore_topk_meta",
+            node_restore_topk_meta(store=store),
+        ),
+    )
+    graph.add_node(
         "evidence_rules_strict",
         wrap_node(
             "evidence_rules_strict",
-            node_evidence_rules_strict("merged_candidates_all"),
+            node_evidence_rules_strict(
+                store=store,
+                candidate_source="retrieved",
+            ),
         ),
     )
     graph.add_node(
@@ -105,7 +125,7 @@ def build_graph(
             node_evidence_llm_judge(
                 llm=llm,
                 prompts=prompts,
-                candidate_source="merged_candidates_all",
+                candidate_source="retrieved",
             ),
         ),
     )
@@ -156,7 +176,8 @@ def build_graph(
     graph.add_edge("retrieval_router", "retrieve_vec")
     graph.add_edge(["retrieve_bm25", "retrieve_vec"], "rrf_rank")
     graph.add_edge("rrf_rank", "topk_filter")
-    graph.add_edge("topk_filter", "evidence_rules_strict")
+    graph.add_edge("topk_filter", "restore_topk_meta")
+    graph.add_edge("restore_topk_meta", "evidence_rules_strict")
     graph.add_edge("evidence_rules_strict", "evidence_router")
 
     def _evidence_route(state: GraphState) -> str:
@@ -267,6 +288,7 @@ def build_graph_for_export(prompts: PromptLoader):
         llm=null_llm,
         openai_client=_NullOpenAIClient(),
         prompts=prompts,
+        store=dummy_store,
         retriever_registry=retriever_registry,
         default_retrievers=["bm25", "vec"],
     )

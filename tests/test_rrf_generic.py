@@ -16,13 +16,11 @@ class RrfGenericTests(unittest.TestCase):
             "bm25_retrieved": [
                 {
                     "id": 1,
-                    "item": {"id": 1, "question": "Q1", "answer": "A1", "url": "u1"},
                     "bm25_raw": 10.0,
                     "bm25_rank": 1,
                 },
                 {
                     "id": 2,
-                    "item": {"id": 2, "question": "Q2", "answer": "A2", "url": "u2"},
                     "bm25_raw": 9.0,
                     "bm25_rank": 2,
                 },
@@ -30,14 +28,12 @@ class RrfGenericTests(unittest.TestCase):
             "vec_retrieved": [
                 {
                     "id": 1,
-                    "item": {"id": 1, "question": "Q1", "answer": "A1", "url": "u1"},
                     "vec_raw": 0.9,
                     "vec_rank": 1,
                     "vec_pass_threshold": True,
                 },
                 {
                     "id": 3,
-                    "item": {"id": 3, "question": "Q3", "answer": "A3", "url": "u3"},
                     "vec_raw": 0.7,
                     "vec_rank": 2,
                     "vec_pass_threshold": True,
@@ -54,6 +50,8 @@ class RrfGenericTests(unittest.TestCase):
         self.assertTrue(merged[0]["passed_any"])
         self.assertIn("bm25", merged[0]["source_contrib"])
         self.assertIn("vec", merged[0]["source_contrib"])
+        self.assertIn("rrf_score", merged[0])
+        self.assertNotIn("item", merged[0])
 
 
 if __name__ == "__main__":

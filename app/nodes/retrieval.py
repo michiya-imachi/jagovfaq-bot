@@ -91,13 +91,13 @@ def node_retrieve_bm25(retriever_registry: RetrieverRegistry):
 
         out: List[Dict[str, Any]] = []
         for row in rows:
-            item = row.get("item")
-            if not isinstance(item, dict):
+            try:
+                rid = int(row["id"])
+            except (TypeError, ValueError, KeyError):
                 continue
             out.append(
                 {
-                    "id": int(row["id"]),
-                    "item": item,
+                    "id": rid,
                     "bm25_raw": row.get("raw_score"),
                     "bm25_rank": row.get("rank"),
                 }
@@ -129,14 +129,14 @@ def node_retrieve_vec_threshold(retriever_registry: RetrieverRegistry):
 
         out: List[Dict[str, Any]] = []
         for row in rows:
-            item = row.get("item")
-            if not isinstance(item, dict):
+            try:
+                rid = int(row["id"])
+            except (TypeError, ValueError, KeyError):
                 continue
             passed = bool(row.get("passed", False))
             out.append(
                 {
-                    "id": int(row["id"]),
-                    "item": item,
+                    "id": rid,
                     "vec_raw": row.get("raw_score"),
                     "vec_rank": row.get("rank"),
                     "vec_pass_threshold": passed,

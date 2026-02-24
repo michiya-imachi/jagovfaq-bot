@@ -81,12 +81,6 @@ def _format_candidates_for_prompt(
         if not isinstance(final_rank, int) or final_rank <= 0:
             final_rank = index
 
-        score = row.get("score", 0.0)
-        if isinstance(score, (int, float)):
-            score_text = f"{float(score):.6f}"
-        else:
-            score_text = "0.000000"
-
         raw_sources = row.get("sources", []) or []
         if isinstance(raw_sources, list):
             sources = ",".join(str(v) for v in raw_sources)
@@ -105,7 +99,6 @@ def _format_candidates_for_prompt(
                 [
                     f"[candidate_{index}]",
                     f"final_rank: {final_rank}",
-                    f"score: {score_text}",
                     f"sources: {sources}",
                     f"passed_any: {str(passed_any).lower()}",
                     f"has_multiple_sources: {str(has_multiple_sources).lower()}",
@@ -143,14 +136,14 @@ def _parse_result_json(raw_text: str) -> Tuple[str, str, str]:
 def node_evidence_llm_judge(
     llm: Any,
     prompts: PromptLoader,
-    candidate_source: str = "merged_candidates_all",
+    candidate_source: str = "retrieved",
 ):
     def _run(state: GraphState) -> GraphState:
         if not bool(state.get("run_evidence_llm", False)):
             logger.info("[evidence-llm] skipped run_evidence_llm=false")
             return {}
 
-        source_key = str(candidate_source or "merged_candidates_all")
+        source_key = str(candidate_source or "retrieved")
         all_candidates: List[Dict[str, Any]] = state.get(source_key, []) or []
         top_n = max(1, get_env_int("EVIDENCE_LLM_TOPN", 5))
         timeout_s = max(1.0, get_env_float("EVIDENCE_LLM_TIMEOUT_S", 25.0))

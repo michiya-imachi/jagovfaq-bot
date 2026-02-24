@@ -26,7 +26,7 @@ class _DummyLLM:
 def _candidate(url: str, question: str = "Q", answer: str = "A"):
     return {
         "item": {"id": 1, "question": question, "answer": answer, "url": url},
-        "score": 0.5,
+        "rrf_score": 0.5,
         "sources": ["bm25"],
         "source_details": {},
     }

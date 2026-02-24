@@ -33,14 +33,20 @@ CLI未指定時は `RETRIEVERS` 環境変数を参照し、未設定なら `bm25
 
 ## Evidence judge environment variables
 
-- `EVIDENCE_TOPN` (default: `10`)
-  - Candidate window for strict rules (`evidence_rules_strict`).
 - `EVIDENCE_LLM_TOPN` (default: `5`)
   - Candidate window sent to LLM judgment (`evidence_llm_judge`).
 - `EVIDENCE_LLM_MODEL` (default: `OPENAI_MODEL`)
   - Optional override model for evidence LLM judgment.
 - `EVIDENCE_LLM_TIMEOUT_S` (default: `25.0`)
   - Per-request timeout in seconds for evidence LLM judgment.
+
+Strict rule (`evidence_rules_strict`) always evaluates the restored TopK (`retrieved`)
+and computes `max(sim)` from query-to-document vector similarity in TopK.
+The threshold is defined in code as `_VEC_SIM_THRESHOLD` in
+`app/nodes/evidence_rules_strict.py` (current default: `0.6`):
+- `none`: TopK is empty
+- `high`: `max(sim) >= 0.6`
+- `low`: `max(sim) < 0.6`
 
 When web search fails (for example timeout or connection errors), the bot continues
 answer generation using local FAQ evidence only.

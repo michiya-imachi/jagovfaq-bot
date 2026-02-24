@@ -1,6 +1,6 @@
 import json
 import pickle
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -39,6 +39,16 @@ class IndexedStore:
     faiss_index: Any
     id_map: List[int]
     embeddings: Optional[OpenAIEmbeddings]
+    id_to_faiss_idx: Dict[int, int] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        id_to_idx: Dict[int, int] = {}
+        for local_idx, rec_id in enumerate(self.id_map):
+            rid = int(rec_id)
+            if rid in id_to_idx:
+                raise ValueError(f"duplicate_faiss_id_map:{rid}")
+            id_to_idx[rid] = int(local_idx)
+        self.id_to_faiss_idx = id_to_idx
 
     @classmethod
     def load(cls, index_dir: Path, embeddings: OpenAIEmbeddings) -> "IndexedStore":
@@ -88,3 +98,48 @@ class IndexedStore:
             rec_id = self.id_map[local_idx]
             res[int(rec_id)] = float(score)
         return res
+
+    def _embed_query_normalized(self, query: str) -> np.ndarray:
+        if self.embeddings is None:
+            raise RuntimeError("Embeddings are not configured.")
+
+        vec = self.embeddings.embed_query(query)
+        q = np.array([vec], dtype=np.float32)
+        if q.ndim != 2 or q.shape[0] != 1:
+            raise ValueError("query_embedding_shape_invalid")
+        faiss.normalize_L2(q)
+        return q[0]
+
+    def _faiss_local_idx(self, rec_id: int) -> int:
+        rid = int(rec_id)
+        if rid not in self.id_to_faiss_idx:
+            raise ValueError(f"faiss_id_reverse_lookup_failed:{rid}")
+        return int(self.id_to_faiss_idx[rid])
+
+    def query_doc_similarities(
+        self,
+        query: str,
+        rec_ids: List[int],
+    ) -> Dict[int, float]:
+        if self.faiss_index is None:
+            raise RuntimeError("FAISS index is not configured.")
+
+        q_vec = self._embed_query_normalized(query)
+        sims: Dict[int, float] = {}
+        for rec_id in rec_ids:
+            rid = int(rec_id)
+            local_idx = self._faiss_local_idx(rid)
+            try:
+                reconstructed = self.faiss_index.reconstruct(local_idx)
+            except Exception as e:
+                raise ValueError(f"faiss_reconstruct_failed:{rid}:{e}") from e
+
+            doc_vec = np.array(reconstructed, dtype=np.float32).reshape(-1)
+            norm = float(np.linalg.norm(doc_vec))
+            if norm <= 0.0:
+                raise ValueError(f"faiss_doc_vector_invalid_norm:{rid}")
+            doc_vec = doc_vec / norm
+
+            sim = float(np.dot(q_vec, doc_vec))
+            sims[rid] = sim
+        return sims

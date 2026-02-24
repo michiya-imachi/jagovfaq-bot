@@ -2,7 +2,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from app.core.config import get_env_int
-from app.core.types import GraphState, MetaItem
+from app.core.types import GraphState
 
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,6 @@ def node_rrf_rank():
 
         def _add_source(
             rid: int,
-            item: MetaItem,
             source: str,
             rank_value: Any,
             raw_value: Any,
@@ -53,7 +52,6 @@ def node_rrf_rank():
             if rid not in by_id:
                 by_id[rid] = {
                     "id": rid,
-                    "item": item,
                     "sources": [],
                     "source_details": {},
                     "source_contrib": {},
@@ -82,9 +80,6 @@ def node_rrf_rank():
             row["source_contrib"][source] = float(contrib)
 
         for row in bm25:
-            item = row.get("item")
-            if not isinstance(item, dict):
-                continue
             try:
                 rid = int(row["id"])
             except (TypeError, ValueError, KeyError):
@@ -93,7 +88,6 @@ def node_rrf_rank():
             raw = _safe_float(row.get("bm25_raw"))
             _add_source(
                 rid=rid,
-                item=item,
                 source="bm25",
                 rank_value=row.get("bm25_rank"),
                 raw_value=raw,
@@ -102,9 +96,6 @@ def node_rrf_rank():
             )
 
         for row in vec:
-            item = row.get("item")
-            if not isinstance(item, dict):
-                continue
             try:
                 rid = int(row["id"])
             except (TypeError, ValueError, KeyError):
@@ -114,7 +105,6 @@ def node_rrf_rank():
             passed = bool(row.get("vec_pass_threshold", False))
             _add_source(
                 rid=rid,
-                item=item,
                 source="vec",
                 rank_value=row.get("vec_rank"),
                 raw_value=raw,
@@ -129,7 +119,7 @@ def node_rrf_rank():
         for _, merged in by_id.items():
             contrib_map = merged.get("source_contrib", {}) or {}
             detail_map = merged.get("source_details", {}) or {}
-            score = float(sum(float(v) for v in contrib_map.values()))
+            rrf_score = float(sum(float(v) for v in contrib_map.values()))
             passed_any = any(
                 detail.get("passed") is True for detail in detail_map.values()
             )
@@ -138,13 +128,13 @@ def node_rrf_rank():
             organized.append(
                 {
                     **merged,
-                    "score": score,
+                    "rrf_score": rrf_score,
                     "passed_any": bool(passed_any),
                     "has_multiple_sources": bool(has_multiple_sources),
                 }
             )
 
-        organized.sort(key=lambda x: x["score"], reverse=True)
+        organized.sort(key=lambda x: x["rrf_score"], reverse=True)
 
         for i, row in enumerate(organized, start=1):
             row["final_rank"] = int(i)
@@ -174,36 +164,16 @@ def node_rrf_rank():
             final_rank = int(row.get("final_rank", 0))
             keep = bool(row.get("keep", False))
             rid = int(row.get("id", -1))
-            score = float(row.get("score", 0.0))
+            rrf_score = float(row.get("rrf_score", 0.0))
             sources = ",".join([str(v) for v in row.get("sources", [])])
-            passed_any = bool(row.get("passed_any", False))
-            multi = bool(row.get("has_multiple_sources", False))
-            contrib_text = ",".join(
-                f"{k}:{float(v):.6f}"
-                for k, v in (row.get("source_contrib", {}) or {}).items()
-            )
-            details = row.get("source_details", {}) or {}
-            detail_text = ",".join(
-                f"{source}(rank={detail.get('rank')} raw={detail.get('raw_score')} passed={detail.get('passed')})"
-                for source, detail in details.items()
-            )
-            item = row.get("item", {}) or {}
-            q = shorten_text(item.get("question", ""), 80)
-            url = shorten_text(item.get("url", ""), 160)
 
             logger.info(
-                '[rrf-rank] #%d keep=%s id=%d score=%.6f sources=%s passed_any=%s multi=%s contribs="%s" details="%s" Q="%s" url="%s"',
+                '[rrf-rank] #%d keep=%s id=%d source=%s rrf_score=%.6f sim_score=n/a',
                 final_rank,
                 str(keep),
                 rid,
-                score,
                 sources,
-                str(passed_any),
-                str(multi),
-                contrib_text,
-                detail_text,
-                q,
-                url,
+                rrf_score,
             )
 
         return {"merged_candidates_all": organized}

@@ -189,6 +189,7 @@ def main() -> None:
         llm=llm,
         openai_client=openai_client,
         prompts=prompts,
+        store=store,
         retriever_registry=retriever_registry,
         default_retrievers=selected_retrievers,
     )
