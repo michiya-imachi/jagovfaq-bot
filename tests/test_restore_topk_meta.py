@@ -35,11 +35,31 @@ class RestoreTopkMetaTests(unittest.TestCase):
         self.assertEqual(out["vec_retrieved"], [])
         self.assertEqual(out["merged_candidates_all"], [])
 
-    def test_raise_when_meta_missing(self):
+    def test_skip_when_meta_missing(self):
         store = _DummyStore()
         run = node_restore_topk_meta(store=store)
-        with self.assertRaises(ValueError):
-            run({"retrieved": [{"id": 999}]})
+        out = run({"retrieved": [{"id": 1}, {"id": 999}]})
+
+        self.assertEqual(len(out["retrieved"]), 1)
+        self.assertEqual(out["retrieved"][0]["id"], 1)
+        self.assertIn("item", out["retrieved"][0])
+
+    def test_empty_when_all_meta_missing(self):
+        store = _DummyStore()
+        run = node_restore_topk_meta(store=store)
+        out = run(
+            {
+                "retrieved": [{"id": 999}],
+                "bm25_retrieved": [{"id": 1}],
+                "vec_retrieved": [{"id": 2}],
+                "merged_candidates_all": [{"id": 3}],
+            }
+        )
+
+        self.assertEqual(out["retrieved"], [])
+        self.assertEqual(out["bm25_retrieved"], [])
+        self.assertEqual(out["vec_retrieved"], [])
+        self.assertEqual(out["merged_candidates_all"], [])
 
 
 if __name__ == "__main__":

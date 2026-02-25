@@ -16,6 +16,7 @@ def node_restore_topk_meta(
     def _run(state: GraphState) -> GraphState:
         raw_rows: List[Dict[str, Any]] = state.get(input_key, []) or []
         restored: List[Dict[str, Any]] = []
+        missing_ids: List[int] = []
 
         for row in raw_rows:
             if not isinstance(row, dict):
@@ -27,7 +28,8 @@ def node_restore_topk_meta(
 
             item = store.meta_by_id.get(rid)
             if not isinstance(item, dict):
-                raise ValueError(f"meta_not_found_for_id:{rid}")
+                missing_ids.append(rid)
+                continue
 
             meta: MetaItem = {
                 "id": int(item.get("id", rid)),
@@ -38,12 +40,26 @@ def node_restore_topk_meta(
             restored.append({**row, "id": rid, "item": meta})
 
         logger.info(
-            "[restore-topk-meta] input_key=%s input=%d output_key=%s output=%d clear_intermediate=true",
+            "[restore-topk-meta] input_key=%s input=%d output_key=%s output=%d skipped_missing_count=%d clear_intermediate=true",
             input_key,
             len(raw_rows),
             output_key,
             len(restored),
+            len(missing_ids),
         )
+        if missing_ids:
+            preview = ",".join(str(v) for v in missing_ids[:20])
+            if len(missing_ids) > 20:
+                logger.warning(
+                    "[restore-topk-meta] skipped_missing_meta_ids=%s (+%d more)",
+                    preview,
+                    len(missing_ids) - 20,
+                )
+            else:
+                logger.warning(
+                    "[restore-topk-meta] skipped_missing_meta_ids=%s",
+                    preview,
+                )
 
         return {
             output_key: restored,

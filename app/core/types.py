@@ -24,7 +24,7 @@ class GraphState(TypedDict, total=False):
     run_vec: bool
     retrieval_plan_reason: str
 
-    # Raw retrieval outputs (ID-centric only; no item payload)
+    # Raw retrieval outputs from retrievers (ID-centric only; no item payload)
     # bm25_retrieved row: id, bm25_rank, bm25_raw
     # vec_retrieved row: id, vec_rank, vec_raw, vec_pass_threshold
     bm25_retrieved: List[Dict[str, Any]]
@@ -37,8 +37,8 @@ class GraphState(TypedDict, total=False):
     merged_candidates_all: List[Dict[str, Any]]
 
     # Final candidates after TopK filter.
-    # - right after topk_filter: ID-centric
-    # - after restore_topk_meta: item attached for downstream usage
+    # - right after topk_filter: ID-centric rows
+    # - after restore_topk_meta: only rows with restored item metadata
     retrieved: List[Dict[str, Any]]
 
     answer: str

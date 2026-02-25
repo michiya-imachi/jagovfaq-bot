@@ -22,17 +22,11 @@ class RetrieveSplitNodeTests(unittest.TestCase):
                     [
                         {
                             "id": 1,
-                            "item": {
-                                "id": 1,
-                                "question": "Q1",
-                                "answer": "A1",
-                                "url": "u1",
-                            },
                             "retriever": "bm25",
                             "raw_score": 1.2,
                             "rank": 1,
                             "passed": None,
-                            "features": {},
+                            "features": {"bm25_raw": 1.2},
                         }
                     ],
                 ),
@@ -66,31 +60,19 @@ class RetrieveSplitNodeTests(unittest.TestCase):
                     [
                         {
                             "id": 2,
-                            "item": {
-                                "id": 2,
-                                "question": "Q2",
-                                "answer": "A2",
-                                "url": "u2",
-                            },
                             "retriever": "vec",
                             "raw_score": 0.8,
                             "rank": 1,
                             "passed": True,
-                            "features": {},
+                            "features": {"vec_raw": 0.8, "vec_pass_threshold": True},
                         },
                         {
                             "id": 3,
-                            "item": {
-                                "id": 3,
-                                "question": "Q3",
-                                "answer": "A3",
-                                "url": "u3",
-                            },
                             "retriever": "vec",
                             "raw_score": 0.1,
                             "rank": 2,
                             "passed": False,
-                            "features": {},
+                            "features": {"vec_raw": 0.1, "vec_pass_threshold": False},
                         },
                     ],
                 ),

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Protocol, Sequence, Tuple
 
-from app.core.candidate import RetrievedCandidate
+from app.core.candidate import RetrieverHit
 from app.core.config import get_env_float, get_env_int
 from app.core.store import IndexedStore
 from app.core.types import GraphState
@@ -12,7 +12,7 @@ from app.core.types import GraphState
 class Retriever(Protocol):
     name: str
 
-    def retrieve(self, query: str, state: GraphState) -> List[RetrievedCandidate]:
+    def retrieve(self, query: str, state: GraphState) -> List[RetrieverHit]:
         ...
 
 
@@ -39,20 +39,16 @@ class BM25Retriever:
     store: IndexedStore
     name: str = "bm25"
 
-    def retrieve(self, query: str, state: GraphState) -> List[RetrievedCandidate]:
+    def retrieve(self, query: str, state: GraphState) -> List[RetrieverHit]:
         topk = max(1, get_env_int("BM25_TOPK", 10))
         scores = self.store.bm25_search(query, top_n=topk)
         ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
-        out: List[RetrievedCandidate] = []
+        out: List[RetrieverHit] = []
         for rank, (rid, score) in enumerate(ranked, start=1):
-            item = self.store.meta_by_id.get(int(rid))
-            if not item:
-                continue
             out.append(
                 {
                     "id": int(rid),
-                    "item": item,
                     "retriever": self.name,
                     "raw_score": float(score),
                     "rank": int(rank),
@@ -68,7 +64,7 @@ class VectorRetriever:
     store: IndexedStore
     name: str = "vec"
 
-    def retrieve(self, query: str, state: GraphState) -> List[RetrievedCandidate]:
+    def retrieve(self, query: str, state: GraphState) -> List[RetrieverHit]:
         search_topn = max(1, get_env_int("VEC_SEARCH_TOPN", 200))
         threshold = get_env_float("VEC_THRESHOLD", 0.35)
         max_keep = max(1, get_env_int("VEC_MAX_KEEP", 30))
@@ -94,16 +90,12 @@ class VectorRetriever:
         else:
             picked = passed_rows
 
-        out: List[RetrievedCandidate] = []
+        out: List[RetrieverHit] = []
         for rid, score, rank in picked:
-            item = self.store.meta_by_id.get(int(rid))
-            if not item:
-                continue
             passed = (not use_fallback) and (float(score) >= threshold)
             out.append(
                 {
                     "id": int(rid),
-                    "item": item,
                     "retriever": self.name,
                     "raw_score": float(score),
                     "rank": int(rank),

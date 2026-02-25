@@ -124,6 +124,11 @@ class IndexedStore:
         if self.faiss_index is None:
             raise RuntimeError("FAISS index is not configured.")
 
+        # Design note:
+        # vec_search() and this method both embed the query, so a flow that runs
+        # vector retrieval and then evidence similarity can call embed_query()
+        # twice for the same query. A future optimization can reuse query
+        # embeddings via graph state or a store-level cache keyed by query text.
         q_vec = self._embed_query_normalized(query)
         sims: Dict[int, float] = {}
         for rec_id in rec_ids:
