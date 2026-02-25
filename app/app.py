@@ -139,14 +139,19 @@ def main() -> None:
         graph_app = build_graph_for_export(prompts)
 
         out_dir = Path(args.graph_out_dir)
-        mmd_path, png_path = export_graph_artifacts(graph_app, out_dir=out_dir)
+        artifacts = export_graph_artifacts(graph_app, out_dir=out_dir)
 
         print("Graph exported:")
-        print(f"- Mermaid: {mmd_path}")
-        if png_path is not None:
-            print(f"- PNG: {png_path}")
+        print(f"- Collapsed Mermaid: {artifacts.collapsed_mmd}")
+        if artifacts.collapsed_png is not None:
+            print(f"- Collapsed PNG: {artifacts.collapsed_png}")
         else:
-            print("- PNG: (failed)")
+            print("- Collapsed PNG: (failed)")
+        print(f"- Expanded Mermaid: {artifacts.expanded_mmd}")
+        if artifacts.expanded_png is not None:
+            print(f"- Expanded PNG: {artifacts.expanded_png}")
+        else:
+            print("- Expanded PNG: (failed)")
         return
 
     if not os.getenv("OPENAI_API_KEY"):

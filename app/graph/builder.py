@@ -7,40 +7,21 @@ from langgraph.graph import END, StateGraph
 from app.core.retriever import BM25Retriever, RetrieverRegistry, VectorRetriever
 from app.core.store import IndexedStore
 from app.core.types import GraphState
-from app.nodes.evidence_finalize import node_evidence_finalize
-from app.nodes.evidence_llm import node_evidence_llm_judge
-from app.nodes.evidence_router import node_evidence_router
-from app.nodes.evidence_rules_strict import node_evidence_rules_strict
+from app.graph.node_logging import with_subgraph_logging, wrap_node
+from app.graph.subgraphs.evidence import build_evidence_subgraph
+from app.graph.subgraphs.rag import build_rag_subgraph
 from app.nodes.hitl import node_hitl_wait_user_input
 from app.nodes.qa import (
     node_fallback,
     node_followup_question,
     node_generate_answer_stream,
 )
-from app.nodes.retrieval import (
-    node_retrieval_router,
-    node_retrieve_bm25,
-    node_retrieve_vec_threshold,
-)
-from app.nodes.restore_topk_meta import node_restore_topk_meta
-from app.nodes.rrf import node_rrf_rank
 from app.nodes.routing import make_response_router
-from app.nodes.standalone_question import node_standalone_question
-from app.nodes.topk_filter import node_topk_filter
 from app.nodes.web import node_web_permission, node_web_search
 from app.prompts.loader import PromptLoader
 
 
 logger = logging.getLogger(__name__)
-
-
-def wrap_node(name: str, fn):
-    # Keep debug logs off by default and enable them when --log-level debug is used.
-    def _wrapped(state: GraphState) -> GraphState:
-        logger.debug("[node] %s", name)
-        return fn(state)
-
-    return _wrapped
 
 
 def build_graph(
@@ -60,81 +41,28 @@ def build_graph(
             raise ValueError("store is required for restore/evidence strict nodes")
         store = inferred_store
 
+    rag_subgraph = build_rag_subgraph(
+        llm=llm,
+        prompts=prompts,
+        retriever_registry=retriever_registry,
+        default_retrievers=default_retrievers,
+        store=store,
+    )
+    evidence_subgraph = build_evidence_subgraph(
+        llm=llm,
+        prompts=prompts,
+        store=store,
+    )
+
     graph = StateGraph(GraphState)
 
     graph.add_node(
-        "standalone_question",
-        wrap_node("standalone_question", node_standalone_question(llm, prompts)),
-    )
-
-    graph.add_node(
-        "retrieval_router",
-        wrap_node(
-            "retrieval_router",
-            node_retrieval_router(
-                retriever_registry=retriever_registry,
-                default_retrievers=default_retrievers,
-            ),
-        ),
+        "rag",
+        with_subgraph_logging("rag", rag_subgraph),
     )
     graph.add_node(
-        "retrieve_bm25",
-        wrap_node("retrieve_bm25", node_retrieve_bm25(retriever_registry)),
-    )
-    graph.add_node(
-        "retrieve_vec",
-        wrap_node("retrieve_vec", node_retrieve_vec_threshold(retriever_registry)),
-    )
-
-    graph.add_node("rrf_rank", wrap_node("rrf_rank", node_rrf_rank()))
-    graph.add_node(
-        "topk_filter",
-        wrap_node(
-            "topk_filter",
-            node_topk_filter(input_key="merged_candidates_all", output_key="retrieved"),
-        ),
-    )
-    graph.add_node(
-        "restore_topk_meta",
-        wrap_node(
-            "restore_topk_meta",
-            node_restore_topk_meta(store=store),
-        ),
-    )
-    graph.add_node(
-        "evidence_rules_strict",
-        wrap_node(
-            "evidence_rules_strict",
-            node_evidence_rules_strict(
-                store=store,
-                candidate_source="retrieved",
-            ),
-        ),
-    )
-    graph.add_node(
-        "evidence_router",
-        wrap_node(
-            "evidence_router",
-            node_evidence_router(),
-        ),
-    )
-    graph.add_node(
-        "evidence_llm_judge",
-        wrap_node(
-            "evidence_llm_judge",
-            node_evidence_llm_judge(
-                llm=llm,
-                prompts=prompts,
-                candidate_source="retrieved",
-            ),
-        ),
-    )
-    graph.add_node(
-        "evidence_finalize",
-        wrap_node(
-            "evidence_finalize",
-            node_evidence_finalize(),
-        ),
+        "evidence",
+        with_subgraph_logging("evidence", evidence_subgraph),
     )
     graph.add_node(
         "response_router",
@@ -167,35 +95,9 @@ def build_graph(
     )
     graph.add_node("fallback", wrap_node("fallback", node_fallback))
 
-    # Entry: always build/refresh the standalone search query first.
-    graph.set_entry_point("standalone_question")
-    graph.add_edge("standalone_question", "retrieval_router")
-
-    # Retrieval flow.
-    graph.add_edge("retrieval_router", "retrieve_bm25")
-    graph.add_edge("retrieval_router", "retrieve_vec")
-    graph.add_edge(["retrieve_bm25", "retrieve_vec"], "rrf_rank")
-    graph.add_edge("rrf_rank", "topk_filter")
-    graph.add_edge("topk_filter", "restore_topk_meta")
-    graph.add_edge("restore_topk_meta", "evidence_rules_strict")
-    graph.add_edge("evidence_rules_strict", "evidence_router")
-
-    def _evidence_route(state: GraphState) -> str:
-        run_llm = bool(state.get("run_evidence_llm", False))
-        nxt = "evidence_llm_judge" if run_llm else "evidence_finalize"
-        logger.debug("[router] evidence_router -> %s", nxt)
-        return nxt
-
-    graph.add_conditional_edges(
-        "evidence_router",
-        _evidence_route,
-        {
-            "evidence_llm_judge": "evidence_llm_judge",
-            "evidence_finalize": "evidence_finalize",
-        },
-    )
-    graph.add_edge("evidence_llm_judge", "evidence_finalize")
-    graph.add_edge("evidence_finalize", "response_router")
+    graph.set_entry_point("rag")
+    graph.add_edge("rag", "evidence")
+    graph.add_edge("evidence", "response_router")
 
     def _router(state: GraphState) -> str:
         nxt = str(state.get("next_node", "fallback") or "fallback")
@@ -221,10 +123,8 @@ def build_graph(
         },
     )
 
-    # HITL loop:
-    # followup_question -> hitl_input_answer -> standalone_question -> retrieval_router ...
     graph.add_edge("followup_question", "hitl_input_answer")
-    graph.add_edge("hitl_input_answer", "standalone_question")
+    graph.add_edge("hitl_input_answer", "rag")
     graph.add_conditional_edges(
         "hitl_permission_web",
         lambda state: "web_search"

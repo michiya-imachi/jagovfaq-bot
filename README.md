@@ -12,6 +12,12 @@ uv run python -m app.app --log-level info --retrievers bm25,vec
 uv run python -m app.app --export-graph
 ```
 
+`--export-graph` 実行時は常に以下4ファイルを出力します:
+- `graph_collapsed.mmd`
+- `graph_collapsed.png`
+- `graph_expanded.mmd`
+- `graph_expanded.png`
+
 インデックス作成
 
 ```shell
